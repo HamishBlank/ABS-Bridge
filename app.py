@@ -6,6 +6,7 @@ monitoring playback progress and syncing back to ABS.
 """
 
 import asyncio
+import base64
 import difflib
 import json
 import logging
@@ -65,16 +66,35 @@ def get_libraries() -> list[dict]:
     return abs_get("/libraries").get("libraries", [])
 
 def get_series_books(library_id: str, series_id: str) -> list[dict]:
-    """Return books in a series, ordered by series sequence."""
-    data = abs_get(f"/libraries/{library_id}/series/{series_id}")
-    books = data.get("books", [])
-    # Sort by series sequence
-    def seq(b):
+    """
+    Return library items belonging to a series, ordered by series sequence.
+
+    ABS does not expose a /series/{id}/books endpoint — books are fetched via
+    the items endpoint with a base64-encoded series filter, which is the same
+    mechanism the ABS web UI uses internally.
+    """
+    # ABS filter format: "series.BASE64(series_id)"
+    encoded = base64.b64encode(series_id.encode()).decode()
+    data = abs_get(f"/libraries/{library_id}/items?filter=series.{encoded}&limit=500&sort=media.metadata.title")
+    items = data.get("results", [])
+
+    def seq(item):
+        """Extract the numeric series sequence for this specific series."""
         try:
-            return float(b.get("seriesSequence") or b.get("sequence") or 0)
+            series_list = (
+                item.get("media", {}).get("metadata", {}).get("series", [])
+                or item.get("media", {}).get("metadata", {}).get("seriesName", [])
+            )
+            if isinstance(series_list, list):
+                for s in series_list:
+                    if isinstance(s, dict) and (s.get("id") == series_id or s.get("name")):
+                        return float(s.get("sequence") or 0)
+            # Fallback: top-level seriesSequence sometimes present on item
+            return float(item.get("seriesSequence") or 0)
         except (ValueError, TypeError):
             return 0
-    return sorted(books, key=seq)
+
+    return sorted(items, key=seq)
 
 def get_book_progress(book_id: str) -> Optional[dict]:
     try:
@@ -233,18 +253,34 @@ class CastSession:
                 pass
 
     def _run(self):
+        browser = None
         try:
-            chromecasts, browser = pychromecast.get_listed_chromecasts(
-                friendly_names=[self.device_name]
+            found: list[pychromecast.Chromecast] = []
+            event = threading.Event()
+
+            def _on_add(uuid, _service):
+                ci = browser.devices.get(uuid)
+                if ci and ci.friendly_name == self.device_name:
+                    cast = pychromecast.get_chromecast_from_cast_info(
+                        ci, pychromecast.socket_client.NetworkAddress(ci.host, ci.port)
+                    )
+                    found.append(cast)
+                    event.set()
+
+            browser = pychromecast.CastBrowser(
+                pychromecast.SimpleCastListener(add_callback=_on_add)
             )
-            if not chromecasts:
+            browser.start_discovery()
+            event.wait(timeout=10)
+            browser.stop_discovery()
+            browser = None
+
+            if not found:
                 self.state = "ERROR"
-                self.error = f"Device '{self.device_name}' not found"
-                pychromecast.discovery.stop_discovery(browser)
+                self.error = f"Device '{self.device_name}' not found on network"
                 return
 
-            self.cast = chromecasts[0]
-            pychromecast.discovery.stop_discovery(browser)
+            self.cast = found[0]
             self.cast.wait()
 
             mc: MediaController = self.cast.media_controller
@@ -291,6 +327,11 @@ class CastSession:
             self.state = "ERROR"
             self.error = str(e)
         finally:
+            if browser:
+                try:
+                    browser.stop_discovery()
+                except Exception:
+                    pass
             if self.cast:
                 try:
                     self.cast.disconnect()
@@ -304,16 +345,26 @@ class CastSession:
 def discover_devices(timeout: int = 5) -> list[dict]:
     global discovered_devices
     log.info("Discovering Chromecast devices...")
-    services, browser = pychromecast.discovery.discover_chromecasts(max_devices=None, timeout=timeout)
-    pychromecast.discovery.stop_discovery(browser)
-    devices = []
-    for svc in services:
-        devices.append({
-            "name": svc.friendly_name,
-            "host": svc.host,
-            "port": svc.port,
-            "model": getattr(svc, "model_name", "Unknown"),
-        })
+
+    found: list[pychromecast.CastInfo] = []
+    browser = pychromecast.CastBrowser(
+        pychromecast.SimpleCastListener(
+            add_callback=lambda uuid, _service: found.append(browser.devices[uuid])
+        )
+    )
+    browser.start_discovery()
+    time.sleep(timeout)
+    browser.stop_discovery()
+
+    devices = [
+        {
+            "name": ci.friendly_name,
+            "host": ci.host,
+            "port": ci.port,
+            "model": ci.model_name or "Unknown",
+        }
+        for ci in found
+    ]
     with discovery_lock:
         discovered_devices = devices
     log.info(f"Found {len(devices)} devices: {[d['name'] for d in devices]}")
@@ -448,8 +499,12 @@ def api_libraries():
 @app.get("/api/libraries/<library_id>/series")
 def api_series(library_id):
     try:
-        data = abs_get(f"/libraries/{library_id}/series?limit=100")
-        return jsonify(data.get("results", []))
+        # ABS returns { results: [{id, name, nameIgnorePrefix, ...}], total, ... }
+        data = abs_get(f"/libraries/{library_id}/series?limit=500&sort=name")
+        results = data.get("results", [])
+        # Normalise to just id + name for the UI
+        series = [{"id": s["id"], "name": s.get("name") or s.get("nameIgnorePrefix") or s["id"]} for s in results]
+        return jsonify(series)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
