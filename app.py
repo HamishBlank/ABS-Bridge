@@ -19,6 +19,7 @@ import uuid
 
 import pychromecast
 import requests
+import zeroconf
 from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 from pychromecast.controllers.media import MediaController
@@ -254,33 +255,36 @@ class CastSession:
 
     def _run(self):
         browser = None
+        zconf = None
         try:
-            found: list[pychromecast.Chromecast] = []
             event = threading.Event()
+            found_info: list[pychromecast.CastInfo] = []
 
             def _on_add(uuid, _service):
                 ci = browser.devices.get(uuid)
                 if ci and ci.friendly_name == self.device_name:
-                    cast = pychromecast.get_chromecast_from_cast_info(
-                        ci, pychromecast.socket_client.NetworkAddress(ci.host, ci.port)
-                    )
-                    found.append(cast)
+                    found_info.append(ci)
                     event.set()
 
+            zconf = zeroconf.Zeroconf()
             browser = pychromecast.CastBrowser(
-                pychromecast.SimpleCastListener(add_callback=_on_add)
+                pychromecast.SimpleCastListener(add_callback=_on_add),
+                zconf,
             )
             browser.start_discovery()
             event.wait(timeout=10)
             browser.stop_discovery()
             browser = None
 
-            if not found:
+            if not found_info:
                 self.state = "ERROR"
                 self.error = f"Device '{self.device_name}' not found on network"
                 return
 
-            self.cast = found[0]
+            ci = found_info[0]
+            self.cast = pychromecast.get_chromecast_from_host(
+                (ci.host, ci.port, ci.uuid, ci.model_name, ci.friendly_name)
+            )
             self.cast.wait()
 
             mc: MediaController = self.cast.media_controller
@@ -332,6 +336,11 @@ class CastSession:
                     browser.stop_discovery()
                 except Exception:
                     pass
+            if zconf:
+                try:
+                    zconf.close()
+                except Exception:
+                    pass
             if self.cast:
                 try:
                     self.cast.disconnect()
@@ -346,15 +355,18 @@ def discover_devices(timeout: int = 5) -> list[dict]:
     global discovered_devices
     log.info("Discovering Chromecast devices...")
 
-    found: list[pychromecast.CastInfo] = []
+    zconf = zeroconf.Zeroconf()
+    # browser must be defined before the listener callback closes over it
     browser = pychromecast.CastBrowser(
         pychromecast.SimpleCastListener(
-            add_callback=lambda uuid, _service: found.append(browser.devices[uuid])
-        )
+            add_callback=lambda uuid, _service: None  # placeholder; we read devices after timeout
+        ),
+        zconf,
     )
     browser.start_discovery()
     time.sleep(timeout)
     browser.stop_discovery()
+    zconf.close()
 
     devices = [
         {
@@ -363,7 +375,8 @@ def discover_devices(timeout: int = 5) -> list[dict]:
             "port": ci.port,
             "model": ci.model_name or "Unknown",
         }
-        for ci in found
+        for ci in browser.devices.values()
+        if ci.friendly_name  # skip any partially-discovered entries
     ]
     with discovery_lock:
         discovered_devices = devices
