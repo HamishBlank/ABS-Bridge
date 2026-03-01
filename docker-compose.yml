@@ -1,0 +1,13 @@
+services:
+  abs-cast-bridge:
+    build: .
+    network_mode: host          # Required for mDNS Chromecast discovery
+    environment:
+      ABS_URL: ${ABS_URL:-http://localhost:13378}
+      ABS_TOKEN: ${ABS_TOKEN}
+      DEFAULT_DEVICE: ${DEFAULT_DEVICE:-}   # Fuzzy friendly name, e.g. "Kitchen" or "Living Room"
+      SERIES_RESTART_TAIL_PCT: ${SERIES_RESTART_TAIL_PCT:-0.05}  # Restart from 0 if within last X% of book
+      HOST_IP: 0.0.0.0
+      PORT: 8123
+      PROGRESS_INTERVAL: 15     # Seconds between ABS progress saves
+    restart: unless-stopped

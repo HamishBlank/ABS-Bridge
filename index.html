@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ABS Cast Bridge</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --surface2: #1a1a24;
+    --border: #2a2a3a;
+    --accent: #7c6af7;
+    --accent2: #f7a26a;
+    --green: #4af0a0;
+    --red: #f04a6a;
+    --yellow: #f0d44a;
+    --text: #e8e8f0;
+    --muted: #666680;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Noise overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none; z-index: 0;
+  }
+
+  /* Grid lines */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(124,106,247,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(124,106,247,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none; z-index: 0;
+  }
+
+  .container {
+    position: relative; z-index: 1;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 32px 20px;
+  }
+
+  /* Header */
+  header {
+    display: flex; align-items: center; gap: 16px;
+    margin-bottom: 48px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 24px;
+  }
+  .logo-icon {
+    width: 44px; height: 44px;
+    background: var(--accent);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+    box-shadow: 0 0 20px rgba(124,106,247,0.4);
+  }
+  .logo-text h1 {
+    font-size: 20px; font-weight: 800; letter-spacing: -0.5px;
+    line-height: 1;
+  }
+  .logo-text span {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px; color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  .status-dot {
+    margin-left: auto;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; font-family: 'Space Mono', monospace;
+    color: var(--muted);
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  .dot.online { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* Sections */
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: rgba(124,106,247,0.3); }
+
+  .card-title {
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 2px;
+    color: var(--muted);
+    margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card-title::before {
+    content: ''; display: block;
+    width: 3px; height: 12px;
+    background: var(--accent);
+    border-radius: 2px;
+  }
+
+  /* Form controls */
+  select, input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: 10px 12px;
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    margin-bottom: 10px;
+    transition: border-color 0.2s;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+  select:focus, input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(124,106,247,0.15);
+  }
+  select option { background: var(--surface2); }
+
+  label {
+    font-size: 12px; color: var(--muted);
+    display: block; margin-bottom: 4px;
+    font-family: 'Space Mono', monospace;
+  }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 10px 20px;
+    border-radius: var(--radius);
+    font-family: 'Syne', sans-serif;
+    font-size: 14px; font-weight: 600;
+    cursor: pointer; border: none;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 0 16px rgba(124,106,247,0.35);
+  }
+  .btn-primary:hover { background: #9080ff; transform: translateY(-1px); box-shadow: 0 4px 20px rgba(124,106,247,0.5); }
+  .btn-primary:active { transform: translateY(0); }
+  .btn-secondary {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-danger {
+    background: rgba(240,74,106,0.15);
+    color: var(--red);
+    border: 1px solid rgba(240,74,106,0.3);
+  }
+  .btn-danger:hover { background: rgba(240,74,106,0.25); }
+  .btn-sm { padding: 6px 12px; font-size: 12px; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; }
+  .btn-full { width: 100%; }
+
+  /* Sessions */
+  .sessions-list { display: flex; flex-direction: column; gap: 12px; }
+
+  .session-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    transition: border-color 0.2s;
+  }
+  .session-card.PLAYING { border-color: rgba(74,240,160,0.4); }
+  .session-card.PAUSED { border-color: rgba(240,212,74,0.4); }
+  .session-card.ERROR { border-color: rgba(240,74,106,0.4); }
+  .session-card.DONE { border-color: rgba(102,102,128,0.4); }
+
+  .session-header {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 12px; margin-bottom: 12px;
+  }
+  .session-title { font-weight: 600; font-size: 15px; line-height: 1.2; }
+  .session-device {
+    font-size: 11px; color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    margin-top: 2px;
+  }
+
+  .badge {
+    font-size: 10px; font-weight: 700;
+    padding: 3px 8px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: 1px;
+    font-family: 'Space Mono', monospace;
+    flex-shrink: 0;
+  }
+  .badge-PLAYING { background: rgba(74,240,160,0.15); color: var(--green); }
+  .badge-PAUSED  { background: rgba(240,212,74,0.15); color: var(--yellow); }
+  .badge-LOADING { background: rgba(124,106,247,0.15); color: var(--accent); }
+  .badge-ERROR   { background: rgba(240,74,106,0.15); color: var(--red); }
+  .badge-DONE    { background: rgba(102,102,128,0.15); color: var(--muted); }
+  .badge-BUFFERING { background: rgba(247,162,106,0.15); color: var(--accent2); }
+  .badge-IDLE    { background: rgba(102,102,128,0.15); color: var(--muted); }
+
+  .progress-bar {
+    height: 4px;
+    background: var(--surface2);
+    border-radius: 2px;
+    overflow: hidden;
+    margin: 10px 0;
+  }
+  .progress-fill {
+    height: 100%; border-radius: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    transition: width 0.5s ease;
+  }
+  .session-PLAYING .progress-fill { background: linear-gradient(90deg, var(--green), var(--accent)); }
+
+  .time-info {
+    display: flex; justify-content: space-between;
+    font-size: 11px; color: var(--muted);
+    font-family: 'Space Mono', monospace;
+  }
+
+  .session-actions { margin-top: 12px; display: flex; gap: 8px; }
+
+  /* Toast */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 12px 18px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    transform: translateY(80px); opacity: 0;
+    transition: all 0.25s ease;
+    z-index: 1000;
+    max-width: 300px;
+  }
+  #toast.show { transform: translateY(0); opacity: 1; }
+  #toast.success { border-color: var(--green); color: var(--green); }
+  #toast.error   { border-color: var(--red); color: var(--red); }
+
+  .empty-state {
+    text-align: center; padding: 40px 20px;
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+  }
+  .empty-state .icon { font-size: 32px; margin-bottom: 12px; opacity: 0.4; }
+
+  .settings-row {
+    display: flex; gap: 10px;
+    margin-bottom: 10px;
+  }
+  .settings-row input { margin-bottom: 0; flex: 1; }
+
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,0.2);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .config-note {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px; color: var(--muted);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    margin-top: 8px;
+    line-height: 1.6;
+  }
+  .config-note b { color: var(--accent2); }
+
+  .section-title {
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 2px;
+    color: var(--muted); margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  .full-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="logo-icon">📻</div>
+    <div class="logo-text">
+      <h1>ABS Cast Bridge</h1>
+      <span>AudioBookshelf → Chromecast</span>
+    </div>
+    <div class="status-dot">
+      <div class="dot" id="statusDot"></div>
+      <span id="statusText">connecting…</span>
+    </div>
+  </header>
+
+  <!-- Config -->
+  <div class="full-card" id="configCard">
+    <div class="card-title">Configuration</div>
+    <div class="settings-row">
+      <div style="flex:1">
+        <label>ABS URL</label>
+        <input type="text" id="absUrl" placeholder="http://192.168.1.100:13378" />
+      </div>
+      <div style="flex:1">
+        <label>API Token</label>
+        <input type="password" id="absToken" placeholder="your-abs-token" />
+      </div>
+    </div>
+    <div style="margin-bottom:10px">
+      <label>Default Chromecast Device <span style="color:var(--accent2)">(fuzzy name — partial match ok)</span></label>
+      <input type="text" id="defaultDevice" placeholder="e.g. Kitchen, living room speaker, bedroom…" style="margin-bottom:0" />
+    </div>
+    <button class="btn btn-secondary btn-sm" onclick="saveConfig()">💾 Save &amp; Connect</button>
+    <div class="config-note">
+      Token found in ABS → <b>Settings → Users → Your User → API Token</b>. Config is saved in localStorage.
+    </div>
+  </div>
+
+  <!-- Cast launcher -->
+  <div class="grid">
+    <div class="card">
+      <div class="card-title">Library &amp; Series</div>
+      <label>Library</label>
+      <select id="librarySelect" onchange="loadSeries()">
+        <option value="">— select library —</option>
+      </select>
+      <label>Series</label>
+      <select id="seriesSelect" onchange="loadBooks()">
+        <option value="">— select series —</option>
+      </select>
+      <label>Book (auto-selected)</label>
+      <select id="bookSelect">
+        <option value="">— loading… —</option>
+      </select>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Chromecast Device</div>
+      <label>Device <span id="defaultDeviceBadge" style="display:none;color:var(--accent2);font-size:10px;margin-left:6px">★ default pre-selected</span></label>
+      <select id="deviceSelect" onchange="onDeviceChange()">
+        <option value="">— scan first —</option>
+      </select>
+      <div id="fuzzyMatchInfo" style="display:none;font-family:'Space Mono',monospace;font-size:11px;color:var(--accent2);margin-bottom:8px;padding:6px 10px;background:rgba(247,162,106,0.08);border-radius:4px;border:1px solid rgba(247,162,106,0.2)">
+        ⟳ fuzzy matched
+      </div>
+      <button class="btn btn-secondary btn-full" style="margin-bottom:10px" onclick="scanDevices()" id="scanBtn">
+        🔍 Scan for Devices
+      </button>
+      <button class="btn btn-primary btn-full" onclick="startCast()" id="castBtn" disabled>
+        ▶ Cast to Device
+      </button>
+    </div>
+  </div>
+
+  <!-- Sessions -->
+  <div class="section-title">Active Sessions</div>
+  <div id="sessionsList">
+    <div class="empty-state">
+      <div class="icon">📡</div>
+      No active sessions
+    </div>
+  </div>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ──────────────────────────────────────────────
+// Config management
+// ──────────────────────────────────────────────
+let API_BASE = '';
+
+function loadConfig() {
+  const saved = JSON.parse(localStorage.getItem('abs_cast_config') || '{}');
+  if (saved.absUrl) document.getElementById('absUrl').value = saved.absUrl;
+  if (saved.absToken) document.getElementById('absToken').value = saved.absToken;
+  if (saved.defaultDevice) document.getElementById('defaultDevice').value = saved.defaultDevice;
+  // Default: same origin
+  API_BASE = saved.apiBase || window.location.origin;
+}
+
+function saveConfig() {
+  const absUrl = document.getElementById('absUrl').value.trim();
+  const absToken = document.getElementById('absToken').value.trim();
+  const defaultDevice = document.getElementById('defaultDevice').value.trim();
+  localStorage.setItem('abs_cast_config', JSON.stringify({ absUrl, absToken, defaultDevice, apiBase: API_BASE }));
+  toast('Config saved', 'success');
+  checkHealth();
+  loadLibraries();
+}
+
+// ──────────────────────────────────────────────
+// API calls
+// ──────────────────────────────────────────────
+async function api(path, opts = {}) {
+  const url = `${API_BASE}${path}`;
+  const r = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+// ──────────────────────────────────────────────
+// Health check
+// ──────────────────────────────────────────────
+async function checkHealth() {
+  try {
+    await api('/health');
+    document.getElementById('statusDot').className = 'dot online';
+    document.getElementById('statusText').textContent = 'online';
+  } catch {
+    document.getElementById('statusDot').className = 'dot';
+    document.getElementById('statusText').textContent = 'offline';
+  }
+}
+
+// ──────────────────────────────────────────────
+// Libraries / Series / Books
+// ──────────────────────────────────────────────
+async function loadLibraries() {
+  try {
+    const libs = await api('/api/libraries');
+    const sel = document.getElementById('librarySelect');
+    sel.innerHTML = '<option value="">— select library —</option>';
+    libs.forEach(l => {
+      const o = document.createElement('option');
+      o.value = l.id; o.textContent = l.name;
+      sel.appendChild(o);
+    });
+  } catch (e) { toast('Failed to load libraries: ' + e.message, 'error'); }
+}
+
+async function loadSeries() {
+  const libId = document.getElementById('librarySelect').value;
+  if (!libId) return;
+  document.getElementById('seriesSelect').innerHTML = '<option>loading…</option>';
+  try {
+    const series = await api(`/api/libraries/${libId}/series`);
+    const sel = document.getElementById('seriesSelect');
+    sel.innerHTML = '<option value="">— select series —</option>';
+    series.forEach(s => {
+      const o = document.createElement('option');
+      o.value = s.id; o.textContent = s.name;
+      sel.appendChild(o);
+    });
+  } catch (e) { toast('Failed to load series: ' + e.message, 'error'); }
+}
+
+async function loadBooks() {
+  const libId = document.getElementById('librarySelect').value;
+  const seriesId = document.getElementById('seriesSelect').value;
+  if (!libId || !seriesId) return;
+  document.getElementById('bookSelect').innerHTML = '<option>loading…</option>';
+  try {
+    const data = await api(`/api/libraries/${libId}/series/${seriesId}/books`);
+    const sel = document.getElementById('bookSelect');
+    sel.innerHTML = '';
+    data.books.forEach(b => {
+      const o = document.createElement('option');
+      o.value = b.id;
+      const isTarget = b.id === data.target_book_id;
+      const suffix = isTarget
+        ? (data.series_restart ? ' ↺ series restart' : ' ← next up')
+        : '';
+      o.textContent = b.title + suffix;
+      if (isTarget) o.selected = true;
+      sel.appendChild(o);
+    });
+    updateCastBtn();
+  } catch (e) { toast('Failed to load books: ' + e.message, 'error'); }
+}
+
+// ──────────────────────────────────────────────
+// Devices
+// ──────────────────────────────────────────────
+async function scanDevices() {
+  const btn = document.getElementById('scanBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Scanning…';
+  try {
+    const devices = await api('/api/devices');
+    const sel = document.getElementById('deviceSelect');
+    sel.innerHTML = '';
+    if (!devices.length) {
+      sel.innerHTML = '<option value="">No devices found</option>';
+      toast('No Chromecast devices found on network', 'error');
+    } else {
+      devices.forEach(d => {
+        const o = document.createElement('option');
+        o.value = d.name;
+        o.textContent = `${d.name} (${d.model || d.host})`;
+        o.dataset.isDefault = d.is_default ? '1' : '0';
+        sel.appendChild(o);
+      });
+
+      // Auto-select default device if server flagged one
+      const defaultOpt = [...sel.options].find(o => o.dataset.isDefault === '1');
+      if (defaultOpt) {
+        sel.value = defaultOpt.value;
+        document.getElementById('defaultDeviceBadge').style.display = 'inline';
+        showFuzzyInfo(defaultOpt.value, document.getElementById('defaultDevice').value.trim());
+      } else {
+        document.getElementById('defaultDeviceBadge').style.display = 'none';
+        document.getElementById('fuzzyMatchInfo').style.display = 'none';
+      }
+
+      toast(`Found ${devices.length} device(s)`, 'success');
+    }
+    updateCastBtn();
+  } catch (e) {
+    toast('Scan failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔍 Scan for Devices';
+  }
+}
+
+function showFuzzyInfo(resolvedName, query) {
+  const el = document.getElementById('fuzzyMatchInfo');
+  if (!query || query.toLowerCase() === resolvedName.toLowerCase()) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'block';
+  el.textContent = `⟳ "${query}" → matched "${resolvedName}"`;
+}
+
+function onDeviceChange() {
+  document.getElementById('defaultDeviceBadge').style.display = 'none';
+  document.getElementById('fuzzyMatchInfo').style.display = 'none';
+  updateCastBtn();
+}
+
+function updateCastBtn() {
+  const hasBook = document.getElementById('bookSelect').value;
+  const hasDevice = document.getElementById('deviceSelect').value;
+  document.getElementById('castBtn').disabled = !(hasBook && hasDevice);
+}
+
+document.getElementById('deviceSelect').addEventListener('change', onDeviceChange);
+document.getElementById('bookSelect').addEventListener('change', updateCastBtn);
+
+// ──────────────────────────────────────────────
+// Cast
+// ──────────────────────────────────────────────
+async function startCast() {
+  const libId = document.getElementById('librarySelect').value;
+  const seriesId = document.getElementById('seriesSelect').value;
+  const bookId = document.getElementById('bookSelect').value;
+  const deviceName = document.getElementById('deviceSelect').value;
+
+  if (!libId || !seriesId || !deviceName) {
+    toast('Please select library, series, and device', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('castBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Casting…';
+
+  try {
+    const session = await api('/api/cast', {
+      method: 'POST',
+      body: JSON.stringify({ library_id: libId, series_id: seriesId, book_id: bookId, device_name: deviceName }),
+    });
+    toast(`Started: ${session.book_title}`, 'success');
+    renderSession(session);
+  } catch (e) {
+    toast('Cast failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '▶ Cast to Device';
+    updateCastBtn();
+  }
+}
+
+// ──────────────────────────────────────────────
+// Sessions
+// ──────────────────────────────────────────────
+let sessions = {};
+
+function formatTime(s) {
+  if (!s || isNaN(s)) return '0:00';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+  return `${m}:${String(sec).padStart(2,'0')}`;
+}
+
+function renderSession(s) {
+  sessions[s.session_id] = s;
+  renderAllSessions();
+}
+
+function renderAllSessions() {
+  const list = document.getElementById('sessionsList');
+  const ids = Object.keys(sessions);
+
+  if (!ids.length) {
+    list.innerHTML = '<div class="empty-state"><div class="icon">📡</div>No active sessions</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  ids.forEach(id => {
+    const s = sessions[id];
+    const pct = s.duration > 0 ? Math.min(100, (s.current_time / s.duration) * 100).toFixed(1) : 0;
+    const div = document.createElement('div');
+    div.className = `session-card ${s.state}`;
+    div.id = `session-${s.session_id}`;
+    div.innerHTML = `
+      <div class="session-header">
+        <div>
+          <div class="session-title">${escHtml(s.book_title)}</div>
+          <div class="session-device">📡 ${escHtml(s.device_name)} · #${s.session_id}</div>
+        </div>
+        <span class="badge badge-${s.state}">${s.state}</span>
+      </div>
+      ${s.error ? `<div style="font-size:12px;color:var(--red);margin-bottom:8px">⚠ ${escHtml(s.error)}</div>` : ''}
+      <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+      <div class="time-info">
+        <span>${formatTime(s.current_time)}</span>
+        <span>${pct}%</span>
+        <span>${formatTime(s.duration)}</span>
+      </div>
+      <div class="session-actions">
+        <button class="btn btn-danger btn-sm" onclick="stopSession('${s.session_id}')">⏹ Stop</button>
+      </div>
+    `;
+    list.appendChild(div);
+  });
+}
+
+async function stopSession(id) {
+  try {
+    await api(`/api/sessions/${id}/stop`, { method: 'POST' });
+    delete sessions[id];
+    renderAllSessions();
+    toast('Session stopped', 'success');
+  } catch (e) {
+    toast('Stop failed: ' + e.message, 'error');
+  }
+}
+
+function escHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Poll sessions every 5s
+async function pollSessions() {
+  try {
+    const list = await api('/api/sessions');
+    list.forEach(s => { sessions[s.session_id] = s; });
+    // Remove sessions not in the list
+    const ids = new Set(list.map(s => s.session_id));
+    Object.keys(sessions).forEach(id => { if (!ids.has(id)) delete sessions[id]; });
+    renderAllSessions();
+  } catch { /* ignore */ }
+}
+
+// ──────────────────────────────────────────────
+// Toast
+// ──────────────────────────────────────────────
+let toastTimeout;
+function toast(msg, type = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `show ${type}`;
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => el.className = '', 3500);
+}
+
+// ──────────────────────────────────────────────
+// Init
+// ──────────────────────────────────────────────
+loadConfig();
+checkHealth();
+loadLibraries();
+setInterval(checkHealth, 30000);
+setInterval(pollSessions, 5000);
+</script>
+</body>
+</html>
