@@ -78,8 +78,10 @@ def _refresh_libraries_and_series(force: bool = False):
                         if default_device:
                             params += f"&device={default_device}"
                         cover_item_id = None
+                        book_count = 0
                         try:
                             books = get_series_books(lib["id"], s["id"])
+                            book_count = len(books)
                             if books:
                                 cover_item_id = books[0]["id"]
                         except Exception:
@@ -87,7 +89,7 @@ def _refresh_libraries_and_series(force: bool = False):
                         enriched.append({
                             "series_id": s["id"],
                             "series_name": name,
-                            "book_count": s.get("numBooks", 0),
+                            "book_count": book_count,
                             "cover_item_id": cover_item_id,
                             "cover_url": f"{ABS_URL}/api/items/{cover_item_id}/cover?token={ABS_TOKEN}" if cover_item_id else None,
                             "qr_url": f"/play?{params}",
