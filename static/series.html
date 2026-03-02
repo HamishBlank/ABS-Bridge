@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Audiobooks</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #fdf6ee;
+    --card-bg: #ffffff;
+    --shadow: 0 4px 16px rgba(0,0,0,0.10);
+    --shadow-hover: 0 8px 32px rgba(0,0,0,0.18);
+    --accent: #f97316;
+    --accent2: #8b5cf6;
+    --text: #1e1a2e;
+    --muted: #7c748a;
+    --radius: 20px;
+    --header-bg: #1e1a2e;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    font-family: 'Nunito', sans-serif;
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* Subtle dot pattern background */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: radial-gradient(circle, rgba(139,92,246,0.08) 1px, transparent 1px);
+    background-size: 28px 28px;
+    pointer-events: none; z-index: 0;
+  }
+
+  header {
+    position: relative; z-index: 1;
+    background: var(--header-bg);
+    padding: 20px 24px;
+    display: flex; align-items: center; gap: 14px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+  }
+
+  .header-icon {
+    width: 48px; height: 48px;
+    background: var(--accent);
+    border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px;
+    flex-shrink: 0;
+    box-shadow: 0 0 0 3px rgba(249,115,22,0.3);
+  }
+
+  header h1 {
+    font-size: 26px; font-weight: 900;
+    color: #fff;
+    letter-spacing: -0.5px;
+    line-height: 1;
+  }
+
+  header p {
+    font-size: 14px; color: rgba(255,255,255,0.5);
+    font-weight: 600; margin-top: 2px;
+  }
+
+  .header-actions {
+    margin-left: auto;
+    display: flex; align-items: center; gap: 10px;
+  }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 10px 18px;
+    border-radius: 50px;
+    font-family: 'Nunito', sans-serif;
+    font-size: 15px; font-weight: 800;
+    cursor: pointer; border: none;
+    transition: all 0.15s;
+    text-decoration: none;
+  }
+  .btn-light {
+    background: rgba(255,255,255,0.12);
+    color: #fff;
+  }
+  .btn-light:hover { background: rgba(255,255,255,0.22); }
+  .btn-orange {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 3px 12px rgba(249,115,22,0.4);
+  }
+  .btn-orange:hover { background: #ea6c0a; transform: translateY(-1px); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+
+  .container {
+    position: relative; z-index: 1;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 32px 20px 60px;
+  }
+
+  /* Library tabs */
+  .lib-tabs {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 28px;
+  }
+  .lib-tab {
+    padding: 8px 20px;
+    border-radius: 50px;
+    font-size: 15px; font-weight: 800;
+    cursor: pointer; border: 2px solid transparent;
+    background: white;
+    color: var(--muted);
+    transition: all 0.15s;
+    box-shadow: var(--shadow);
+  }
+  .lib-tab:hover { color: var(--accent); border-color: var(--accent); }
+  .lib-tab.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+    box-shadow: 0 3px 12px rgba(249,115,22,0.3);
+  }
+
+  /* Series grid */
+  .series-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 24px;
+  }
+
+  @media (max-width: 480px) {
+    .series-grid { grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  }
+
+  .series-card {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    cursor: pointer;
+    transition: transform 0.18s, box-shadow 0.18s;
+    display: flex; flex-direction: column;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .series-card:hover {
+    transform: translateY(-4px) scale(1.02);
+    box-shadow: var(--shadow-hover);
+  }
+
+  .series-card:active {
+    transform: scale(0.97);
+  }
+
+  .cover-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    background: linear-gradient(135deg, #e9d5ff 0%, #fde68a 100%);
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .cover-wrap img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: opacity 0.3s;
+  }
+
+  .cover-placeholder {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 56px;
+  }
+
+  .book-count-badge {
+    position: absolute; top: 8px; right: 8px;
+    background: rgba(30,26,46,0.75);
+    backdrop-filter: blur(4px);
+    color: #fff;
+    font-size: 11px; font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 50px;
+    letter-spacing: 0.3px;
+  }
+
+  .series-name {
+    padding: 12px 14px 14px;
+    font-size: 15px; font-weight: 800;
+    line-height: 1.3;
+    color: var(--text);
+    text-align: center;
+  }
+
+  /* Loading / empty states */
+  .state-box {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+  .state-box .big-icon { font-size: 56px; margin-bottom: 16px; }
+  .state-box p { font-size: 18px; font-weight: 700; }
+  .state-box small { font-size: 14px; font-weight: 600; display: block; margin-top: 6px; opacity: 0.7; }
+
+  /* Spinner */
+  .spinner-ring {
+    display: inline-block;
+    width: 20px; height: 20px;
+    border: 3px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Now playing toast */
+  #nowPlaying {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(100px);
+    background: var(--header-bg);
+    color: #fff;
+    padding: 16px 24px;
+    border-radius: 50px;
+    font-size: 16px; font-weight: 800;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+    z-index: 100;
+    max-width: 90vw;
+    text-align: center;
+    display: flex; align-items: center; gap: 10px;
+    white-space: nowrap;
+  }
+  #nowPlaying.show { transform: translateX(-50%) translateY(0); }
+  #nowPlaying .np-icon { font-size: 20px; }
+
+  /* Error toast */
+  #errorToast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(100px);
+    background: #ef4444;
+    color: #fff;
+    padding: 14px 22px;
+    border-radius: 50px;
+    font-size: 15px; font-weight: 800;
+    box-shadow: 0 6px 24px rgba(239,68,68,0.4);
+    transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+    z-index: 100;
+    max-width: 90vw;
+    text-align: center;
+  }
+  #errorToast.show { transform: translateX(-50%) translateY(0); }
+
+  /* Casting overlay on card */
+  .series-card.casting .cover-wrap::after {
+    content: '🎧';
+    position: absolute; inset: 0;
+    background: rgba(249,115,22,0.85);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 48px;
+    animation: pulse-overlay 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse-overlay { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-icon">🎧</div>
+  <div>
+    <h1>My Audiobooks</h1>
+    <p id="headerSub">Choose a series to listen to</p>
+  </div>
+  <div class="header-actions">
+    <button class="btn btn-orange" id="loadBtn" onclick="loadSeries()">
+      Load Books
+    </button>
+    <a href="/" class="btn btn-light">⚙ Dashboard</a>
+  </div>
+</header>
+
+<div class="container">
+  <div class="lib-tabs" id="libTabs"></div>
+  <div id="content">
+    <div class="state-box">
+      <div class="big-icon">📚</div>
+      <p>Tap "Load Books" to start!</p>
+      <small>Make sure the dashboard is configured first</small>
+    </div>
+  </div>
+</div>
+
+<div id="nowPlaying">
+  <span class="np-icon">🎧</span>
+  <span id="npText">Starting…</span>
+</div>
+
+<div id="errorToast"></div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────
+const API_BASE = window.location.origin;
+
+function getCfg() {
+  try { return JSON.parse(localStorage.getItem('abs_cast_config') || '{}'); } catch { return {}; }
+}
+
+// ── API ───────────────────────────────────────────────────────────────────
+async function api(path, opts = {}) {
+  const r = await fetch(`${API_BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+// ── State ─────────────────────────────────────────────────────────────────
+let allSeries = [];   // flat list across all libraries
+let libraries = [];
+let activeLibId = null;
+let castingSeriesId = null;
+
+// ── Load ──────────────────────────────────────────────────────────────────
+async function loadSeries() {
+  const btn = document.getElementById('loadBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-ring"></span> Loading…';
+  setContent('<div class="state-box"><div class="big-icon">⏳</div><p>Finding your books…</p></div>');
+
+  try {
+    const cfg = getCfg();
+    const device = cfg.defaultDevice || '';
+    const params = device ? `?device=${encodeURIComponent(device)}` : '';
+    allSeries = await api(`/api/series-lookup${params}`);
+
+    // Build library list
+    const libMap = {};
+    allSeries.forEach(s => { libMap[s.library_id] = s.library_name; });
+    libraries = Object.entries(libMap).map(([id, name]) => ({ id, name }));
+    activeLibId = libraries[0]?.id || null;
+
+    renderTabs();
+    renderGrid();
+
+    document.getElementById('headerSub').textContent =
+      `${allSeries.length} series across ${libraries.length} librar${libraries.length === 1 ? 'y' : 'ies'}`;
+
+  } catch (e) {
+    setContent(`<div class="state-box"><div class="big-icon">😕</div><p>Couldn't load books</p><small>${escHtml(e.message)}</small></div>`);
+    showError(e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↺ Reload';
+  }
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────
+function renderTabs() {
+  const tabs = document.getElementById('libTabs');
+  if (libraries.length <= 1) { tabs.innerHTML = ''; return; }
+  tabs.innerHTML = libraries.map(l => `
+    <button class="lib-tab ${l.id === activeLibId ? 'active' : ''}"
+            onclick="setLib('${l.id}')">
+      ${escHtml(l.name)}
+    </button>
+  `).join('');
+}
+
+function setLib(id) {
+  activeLibId = id;
+  renderTabs();
+  renderGrid();
+}
+
+// ── Grid ──────────────────────────────────────────────────────────────────
+function renderGrid() {
+  const filtered = activeLibId
+    ? allSeries.filter(s => s.library_id === activeLibId)
+    : allSeries;
+
+  if (!filtered.length) {
+    setContent('<div class="state-box"><div class="big-icon">📭</div><p>No series found</p></div>');
+    return;
+  }
+
+  const cards = filtered.map(s => {
+    const isCasting = castingSeriesId === s.series_id;
+    const coverHtml = s.cover_url
+      ? `<img src="${escHtml(s.cover_url)}" alt="${escHtml(s.series_name)}"
+              onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
+              loading="lazy" />
+         <div class="cover-placeholder" style="display:none">📖</div>`
+      : `<div class="cover-placeholder">📖</div>`;
+
+    return `
+      <div class="series-card ${isCasting ? 'casting' : ''}"
+           id="sc-${escHtml(s.series_id)}"
+           onclick="playSeries(${JSON.stringify(s)})">
+        <div class="cover-wrap">
+          ${coverHtml}
+          <div class="book-count-badge">${s.book_count} book${s.book_count != 1 ? 's' : ''}</div>
+        </div>
+        <div class="series-name">${escHtml(s.series_name)}</div>
+      </div>
+    `;
+  }).join('');
+
+  setContent(`<div class="series-grid">${cards}</div>`);
+}
+
+// ── Cast ──────────────────────────────────────────────────────────────────
+async function playSeries(s) {
+  if (castingSeriesId === s.series_id) return; // already casting this one
+  castingSeriesId = s.series_id;
+  renderGrid(); // show casting overlay
+
+  try {
+    const cfg = getCfg();
+    const device = cfg.defaultDevice || '';
+    const resp = await api('/api/cast', {
+      method: 'POST',
+      body: JSON.stringify({
+        library_id: s.library_id,
+        series_id: s.series_id,
+        device_name: device || undefined,
+      }),
+    });
+    showNowPlaying(`${resp.book_title}`);
+  } catch (e) {
+    castingSeriesId = null;
+    renderGrid();
+    showError(e.message);
+  }
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────
+function setContent(html) {
+  document.getElementById('content').innerHTML = html;
+}
+
+let npTimeout;
+function showNowPlaying(title) {
+  document.getElementById('npText').textContent = title;
+  const el = document.getElementById('nowPlaying');
+  el.classList.add('show');
+  clearTimeout(npTimeout);
+  npTimeout = setTimeout(() => {
+    el.classList.remove('show');
+    castingSeriesId = null;
+    renderGrid();
+  }, 5000);
+}
+
+let errTimeout;
+function showError(msg) {
+  const el = document.getElementById('errorToast');
+  el.textContent = '⚠ ' + msg;
+  el.classList.add('show');
+  clearTimeout(errTimeout);
+  errTimeout = setTimeout(() => el.classList.remove('show'), 4000);
+}
+
+function escHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+</script>
+</body>
+</html>

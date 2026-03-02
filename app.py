@@ -778,6 +778,14 @@ def api_series_lookup():
                     params = f"library={lib['id']}&series={s['id']}"
                     if device:
                         params += f"&device={device}"
+                    # Get the first book's ID for the cover image
+                    cover_item_id = None
+                    try:
+                        books = get_series_books(lib["id"], s["id"])
+                        if books:
+                            cover_item_id = books[0]["id"]
+                    except Exception:
+                        pass
                     results.append({
                         "library_id": lib["id"],
                         "library_name": lib.get("name", ""),
@@ -785,6 +793,8 @@ def api_series_lookup():
                         "series_name": name,
                         "qr_url": f"/play?{params}",
                         "book_count": s.get("numBooks", "?"),
+                        "cover_item_id": cover_item_id,
+                        "cover_url": f"{ABS_URL}/api/items/{cover_item_id}/cover?token={ABS_TOKEN}" if cover_item_id else None,
                     })
             except Exception as e:
                 log.warning(f"Series lookup failed for library {lib['id']}: {e}")
@@ -792,6 +802,11 @@ def api_series_lookup():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.get("/series")
+def series_page():
+    from flask import send_from_directory
+    return send_from_directory("static", "series.html")
 
 @app.get("/")
 def index():
