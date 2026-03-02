@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
 COPY static/ static/
+COPY templates/ templates/
 
 EXPOSE 8123
 CMD ["python", "app.py"]

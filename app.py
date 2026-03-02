@@ -618,101 +618,16 @@ def api_stop(session_id):
 # DEFAULT_DEVICE is configured.
 # ---------------------------------------------------------------------------
 
-QR_PAGE = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{title}</title>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=Space+Mono&display=swap" rel="stylesheet">
-<style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{
-    background: #0a0a0f;
-    color: #e8e8f0;
-    font-family: 'Syne', sans-serif;
-    min-height: 100vh;
-    display: flex; align-items: center; justify-content: center;
-    padding: 24px;
-  }}
-  .card {{
-    background: #111118;
-    border: 1px solid #2a2a3a;
-    border-radius: 16px;
-    padding: 40px 36px;
-    max-width: 420px;
-    width: 100%;
-    text-align: center;
-  }}
-  .icon {{ font-size: 48px; margin-bottom: 20px; }}
-  .status {{
-    font-size: 11px; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 3px;
-    font-family: 'Space Mono', monospace;
-    margin-bottom: 16px;
-    color: {status_color};
-  }}
-  h1 {{
-    font-size: 22px; font-weight: 800;
-    line-height: 1.2; margin-bottom: 10px;
-  }}
-  .subtitle {{
-    font-size: 13px; color: #666680;
-    font-family: 'Space Mono', monospace;
-    line-height: 1.6;
-    margin-bottom: 28px;
-  }}
-  .device-badge {{
-    display: inline-flex; align-items: center; gap: 8px;
-    background: rgba(124,106,247,0.1);
-    border: 1px solid rgba(124,106,247,0.25);
-    border-radius: 20px;
-    padding: 8px 16px;
-    font-size: 13px; font-weight: 600;
-    color: #a090ff;
-    margin-bottom: 28px;
-  }}
-  .error-box {{
-    background: rgba(240,74,106,0.1);
-    border: 1px solid rgba(240,74,106,0.3);
-    border-radius: 8px;
-    padding: 14px;
-    font-size: 13px; color: #f04a6a;
-    font-family: 'Space Mono', monospace;
-    line-height: 1.5;
-    margin-bottom: 24px;
-    text-align: left;
-  }}
-  .resume-info {{
-    font-size: 12px; color: #666680;
-    font-family: 'Space Mono', monospace;
-  }}
-  .resume-info span {{ color: #4af0a0; }}
-  a {{
-    color: #7c6af7; text-decoration: none;
-    font-size: 13px;
-    display: block; margin-top: 24px;
-    font-family: 'Space Mono', monospace;
-  }}
-  a:hover {{ text-decoration: underline; }}
-</style>
-</head>
-<body>
-<div class="card">
-  <div class="icon">{icon}</div>
-  <div class="status">{status_label}</div>
-  <h1>{heading}</h1>
-  <div class="subtitle">{subtitle}</div>
-  {extra_html}
-  <a href="/">← Open dashboard</a>
-</div>
-</body>
-</html>"""
-
+import os as _os
+_HERE = _os.path.dirname(_os.path.abspath(__file__))
 
 def _render_qr_page(icon, status_label, status_color, heading, subtitle, extra_html=""):
-    return QR_PAGE.format(
-        title=heading,
+    from flask import render_template_string
+    template_path = _os.path.join(_HERE, "templates", "play.html")
+    with open(template_path, "r") as f:
+        template_str = f.read()
+    return render_template_string(
+        template_str,
         icon=icon,
         status_label=status_label,
         status_color=status_color,
@@ -774,10 +689,24 @@ def qr_play():
             ), 404
 
         book_title = target.get("media", {}).get("metadata", {}).get("title", "Unknown")
-        series_name = (
-            books[0].get("media", {}).get("metadata", {}).get("series", [{}])[0].get("name", "")
-            if books else ""
-        )
+        series_raw = books[0].get("media", {}).get("metadata", {}).get("series") if books else None
+        log.debug(f"series_raw type={type(series_raw).__name__} value={series_raw!r}")
+        series_name = ""
+        if isinstance(series_raw, str):
+            series_name = series_raw
+        elif isinstance(series_raw, dict):
+            # {"0": {"name": "..."}} or {"name": "..."}
+            first = next(iter(series_raw.values()), None)
+            if isinstance(first, dict):
+                series_name = first.get("name", "")
+            elif isinstance(first, str):
+                series_name = first
+        elif isinstance(series_raw, list) and series_raw:
+            first = series_raw[0]
+            if isinstance(first, dict):
+                series_name = first.get("name", "")
+            elif isinstance(first, str):
+                series_name = first
         stream_url, start_time = get_stream_url(target["id"], series_restart=series_restart)
 
         session = CastSession(
