@@ -226,6 +226,7 @@
   .badge-LOADING { background: rgba(124,106,247,0.15); color: var(--accent); }
   .badge-ERROR   { background: rgba(240,74,106,0.15); color: var(--red); }
   .badge-DONE    { background: rgba(102,102,128,0.15); color: var(--muted); }
+  .badge-STOPPED { background: rgba(102,102,128,0.15); color: var(--muted); }
   .badge-BUFFERING { background: rgba(247,162,106,0.15); color: var(--accent2); }
   .badge-IDLE    { background: rgba(102,102,128,0.15); color: var(--muted); }
 
@@ -728,10 +729,9 @@ function escHtml(s) {
 async function pollSessions() {
   try {
     const list = await api('/api/sessions');
+    // Replace entirely from server — don't merge, so deleted sessions don't resurface
+    sessions = {};
     list.forEach(s => { sessions[s.session_id] = s; });
-    // Remove sessions not in the list
-    const ids = new Set(list.map(s => s.session_id));
-    Object.keys(sessions).forEach(id => { if (!ids.has(id)) delete sessions[id]; });
     renderAllSessions();
   } catch { /* ignore */ }
 }

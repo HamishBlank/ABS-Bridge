@@ -220,11 +220,12 @@ class CastSession:
     start_time: float
     duration: float = 0.0
     current_time: float = 0.0
-    state: str = "IDLE"   # IDLE | LOADING | PLAYING | PAUSED | BUFFERING | DONE | ERROR
+    state: str = "IDLE"   # IDLE | LOADING | PLAYING | PAUSED | BUFFERING | DONE | STOPPED | ERROR
     error: str = ""
     cast: object = field(default=None, repr=False)
     _stop: threading.Event = field(default_factory=threading.Event, repr=False)
     _thread: object = field(default=None, repr=False)
+    _stopped_at: float = field(default=0.0, repr=False)  # epoch time when stopped/done
 
     def to_dict(self) -> dict:
         return {
@@ -245,6 +246,8 @@ class CastSession:
         self._thread.start()
 
     def stop(self):
+        self.state = "STOPPED"
+        self._stopped_at = time.time()
         self._stop.set()
         if self.cast:
             try:
@@ -322,6 +325,7 @@ class CastSession:
                     # Playback ended naturally
                     update_abs_progress(self.book_id, self.duration or self.current_time, self.duration or self.current_time)
                     self.state = "DONE"
+                    self._stopped_at = time.time()
                     break
 
                 time.sleep(2)
@@ -330,6 +334,7 @@ class CastSession:
             log.exception(f"CastSession error: {e}")
             self.state = "ERROR"
             self.error = str(e)
+            self._stopped_at = time.time()
         finally:
             if browser:
                 try:
@@ -589,8 +594,23 @@ def api_cast():
         log.exception("Cast error")
         return jsonify({"error": str(e)}), 500
 
+TERMINAL_STATES = {"DONE", "STOPPED", "ERROR"}
+SESSION_EVICT_AFTER = 30  # seconds — keep terminal sessions visible briefly then drop them
+
+def _evict_terminal_sessions():
+    """Remove sessions that have been in a terminal state for more than SESSION_EVICT_AFTER seconds."""
+    now = time.time()
+    to_delete = [
+        sid for sid, s in cast_sessions.items()
+        if s.state in TERMINAL_STATES and s._stopped_at > 0 and (now - s._stopped_at) > SESSION_EVICT_AFTER
+    ]
+    for sid in to_delete:
+        del cast_sessions[sid]
+        log.info(f"Evicted terminal session {sid}")
+
 @app.get("/api/sessions")
 def api_sessions():
+    _evict_terminal_sessions()
     return jsonify([s.to_dict() for s in cast_sessions.values()])
 
 @app.get("/api/sessions/<session_id>")
@@ -606,6 +626,7 @@ def api_stop(session_id):
     if not s:
         return jsonify({"error": "Not found"}), 404
     s.stop()
+    del cast_sessions[session_id]
     return jsonify({"ok": True})
 
 
