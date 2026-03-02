@@ -361,7 +361,17 @@
     </div>
   </div>
 
-  <!-- Cast launcher -->
+  <!-- Cache Status -->
+  <div class="full-card" id="cacheCard" style="margin-bottom:16px">
+    <div class="card-title">Cache Status</div>
+    <div id="cacheStatus" style="font-family:'Space Mono',monospace;font-size:12px;color:var(--muted);line-height:1.8">
+      Loading…
+    </div>
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button class="btn btn-secondary btn-sm" onclick="refreshCache()">🔄 Force Refresh</button>
+      <span id="cacheRefreshMsg" style="font-size:11px;color:var(--green);font-family:'Space Mono',monospace;line-height:32px;display:none">✓ Refresh started</span>
+    </div>
+  </div>
   <div class="grid">
     <div class="card">
       <div class="card-title">Library &amp; Series</div>
@@ -749,13 +759,48 @@ function toast(msg, type = '') {
 }
 
 // ──────────────────────────────────────────────
+// Cache status
+// ──────────────────────────────────────────────
+async function loadCacheStatus() {
+  try {
+    const s = await api('/api/cache/status');
+    const age = (oldest) => {
+      if (!oldest) return 'never';
+      const secs = Math.round(Date.now()/1000 - oldest);
+      if (secs < 60) return `${secs}s ago`;
+      if (secs < 3600) return `${Math.round(secs/60)}m ago`;
+      return `${Math.round(secs/3600)}h ago`;
+    };
+    document.getElementById('cacheStatus').innerHTML = `
+      📚 Libraries: <b style="color:${s.libraries.stale?'var(--red)':'var(--green)'}">${s.libraries.count}</b> · refreshed ${age(s.libraries.oldest)} ${s.libraries.stale?'<span style="color:var(--red)">(stale)</span>':''}
+      <br>📖 Series: <b style="color:${s.series.stale?'var(--red)':'var(--green)'}">${s.series.count}</b> · refreshed ${age(s.series.oldest)} ${s.series.stale?'<span style="color:var(--red)">(stale)</span>':''}
+      <br>📡 Devices: <b style="color:${s.devices.stale?'var(--red)':'var(--green)'}">${s.devices.count}</b> · refreshed ${age(s.devices.oldest)} ${s.devices.stale?'<span style="color:var(--red)">(stale)</span>':''}
+      <br>🎧 Sessions recorded: <b>${s.sessions.total}</b>
+    `;
+  } catch (e) {
+    document.getElementById('cacheStatus').textContent = 'Could not load cache status';
+  }
+}
+
+async function refreshCache() {
+  try {
+    await api('/api/cache/refresh', { method: 'POST' });
+    const msg = document.getElementById('cacheRefreshMsg');
+    msg.style.display = 'inline';
+    setTimeout(() => { msg.style.display = 'none'; loadCacheStatus(); }, 3000);
+  } catch (e) { toast('Refresh failed: ' + e.message, 'error'); }
+}
+
+// ──────────────────────────────────────────────
 // Init
 // ──────────────────────────────────────────────
 loadConfig();
 checkHealth();
 loadLibraries();
+loadCacheStatus();
 setInterval(checkHealth, 30000);
 setInterval(pollSessions, 5000);
+setInterval(loadCacheStatus, 30000);
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>

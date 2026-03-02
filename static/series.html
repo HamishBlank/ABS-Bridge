@@ -364,7 +364,7 @@
     <p id="headerSub">Choose a series to listen to</p>
   </div>
   <div class="header-actions">
-    <button class="btn btn-orange" id="loadBtn" onclick="loadSeries()">
+    <button class="btn btn-orange" id="loadBtn" onclick="loadSeries(true)">
       ↺ Reload
     </button>
     <a href="/" class="btn btn-light">⚙ Dashboard</a>
@@ -419,32 +419,34 @@ let castingSeriesId = null;
 let cardSeriesMap = {};  // index → series object, rebuilt on each renderGrid()
 
 // ── Load ──────────────────────────────────────────────────────────────────
-async function loadSeries() {
+async function loadSeries(force = false) {
   const btn = document.getElementById('loadBtn');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-ring"></span> Loading…';
-  setContent('<div class="state-box"><div class="big-icon">⏳</div><p>Finding your books…</p></div>');
+  btn.innerHTML = '<span class="spinner-ring"></span>';
+
+  if (!allSeries.length) {
+    setContent('<div class="state-box"><div class="big-icon">⏳</div><p>Loading your books…</p></div>');
+  }
 
   try {
-    const cfg = getCfg();
-    const device = cfg.defaultDevice || '';
-    const params = device ? `?device=${encodeURIComponent(device)}` : '';
-    allSeries = await api(`/api/series-lookup${params}`);
+    const url = force ? '/api/series-lookup?refresh=1' : '/api/series-lookup';
+    allSeries = await api(url);
 
-    // Build library list
     const libMap = {};
     allSeries.forEach(s => { libMap[s.library_id] = s.library_name; });
     libraries = Object.entries(libMap).map(([id, name]) => ({ id, name }));
-    activeLibId = libraries[0]?.id || null;
+    if (!activeLibId) activeLibId = libraries[0]?.id || null;
 
     renderTabs();
     renderGrid();
 
     document.getElementById('headerSub').textContent =
-      `${allSeries.length} series across ${libraries.length} librar${libraries.length === 1 ? 'y' : 'ies'}`;
+      `${allSeries.length} series · ${force ? 'just refreshed' : 'from cache'}`;
 
   } catch (e) {
-    setContent(`<div class="state-box"><div class="big-icon">😕</div><p>Couldn't load books</p><small>${escHtml(e.message)}</small></div>`);
+    if (!allSeries.length) {
+      setContent(`<div class="state-box"><div class="big-icon">😕</div><p>Couldn't load books</p><small>${escHtml(e.message)}</small></div>`);
+    }
     showError(e.message);
   } finally {
     btn.disabled = false;

@@ -11,6 +11,7 @@ import difflib
 import json
 import logging
 import os
+import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field, asdict
@@ -23,6 +24,8 @@ import zeroconf
 from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 from pychromecast.controllers.media import MediaController
+
+import db as database
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -40,6 +43,7 @@ HOST_IP = os.getenv("HOST_IP", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8123"))
 DEFAULT_DEVICE = os.getenv("DEFAULT_DEVICE", "")   # friendly name of preferred Chromecast
 SERIES_RESTART_TAIL_PCT = float(os.getenv("SERIES_RESTART_TAIL_PCT", "0.05"))  # 0.0–1.0; default 5%
+CACHE_REFRESH_INTERVAL  = int(os.getenv("CACHE_REFRESH_INTERVAL", "60"))       # seconds between background refresh checks
 
 # ---------------------------------------------------------------------------
 # State
@@ -47,6 +51,77 @@ SERIES_RESTART_TAIL_PCT = float(os.getenv("SERIES_RESTART_TAIL_PCT", "0.05"))  #
 cast_sessions: dict[str, "CastSession"] = {}
 discovered_devices: list[dict] = []
 discovery_lock = threading.Lock()
+
+# ---------------------------------------------------------------------------
+# Background cache refresh
+# ---------------------------------------------------------------------------
+
+def _refresh_libraries_and_series(force: bool = False):
+    """Fetch libraries + series from ABS and store in DB cache."""
+    try:
+        if force or database.libraries_stale():
+            libs = get_libraries()
+            database.upsert_libraries(libs)
+        else:
+            libs = database.get_libraries_cached()
+
+        for lib in libs:
+            if force or database.series_stale(lib["id"]):
+                try:
+                    raw_series = abs_get(f"/libraries/{lib['id']}/series?limit=500&sort=name").get("results", [])
+                    enriched = []
+                    for s in raw_series:
+                        name = s.get("name") or s.get("nameIgnorePrefix") or s["id"]
+                        cfg = database.get_devices_cached()
+                        default_device = next((d["name"] for d in cfg if d.get("is_default")), DEFAULT_DEVICE or "")
+                        params = f"library={lib['id']}&series={s['id']}"
+                        if default_device:
+                            params += f"&device={default_device}"
+                        cover_item_id = None
+                        try:
+                            books = get_series_books(lib["id"], s["id"])
+                            if books:
+                                cover_item_id = books[0]["id"]
+                        except Exception:
+                            pass
+                        enriched.append({
+                            "series_id": s["id"],
+                            "series_name": name,
+                            "book_count": s.get("numBooks", 0),
+                            "cover_item_id": cover_item_id,
+                            "cover_url": f"{ABS_URL}/api/items/{cover_item_id}/cover?token={ABS_TOKEN}" if cover_item_id else None,
+                            "qr_url": f"/play?{params}",
+                        })
+                    database.upsert_series(lib["id"], enriched)
+                except Exception as e:
+                    log.warning(f"Series refresh failed for library {lib['id']}: {e}")
+    except Exception as e:
+        log.warning(f"Library/series refresh failed: {e}")
+
+
+def _refresh_devices(force: bool = False):
+    """Discover Chromecast devices and cache them."""
+    try:
+        if force or database.devices_stale():
+            devices = discover_devices()
+            if DEFAULT_DEVICE:
+                match = fuzzy_match_device(DEFAULT_DEVICE, devices)
+                for d in devices:
+                    d["is_default"] = (match is not None and d["name"] == match["name"])
+            database.upsert_devices(devices)
+    except Exception as e:
+        log.warning(f"Device refresh failed: {e}")
+
+
+def _background_refresh():
+    """Background thread: keep library, series, and device caches fresh."""
+    # Stagger the first runs to avoid hammering on startup
+    time.sleep(3)
+    log.info("Background refresh thread started")
+    while True:
+        _refresh_libraries_and_series()
+        _refresh_devices()
+        time.sleep(CACHE_REFRESH_INTERVAL)
 
 # ---------------------------------------------------------------------------
 # ABS API helpers
@@ -246,6 +321,7 @@ class CastSession:
         }
 
     def start(self):
+        database.upsert_session(self.to_dict())
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -253,6 +329,7 @@ class CastSession:
         self.state = "STOPPED"
         self._stopped_at = time.time()
         self._stop.set()
+        database.upsert_session({**self.to_dict(), "stopped_at": self._stopped_at})
         if self.cast:
             try:
                 self.cast.media_controller.stop()
@@ -265,6 +342,7 @@ class CastSession:
             try:
                 self.cast.media_controller.pause()
                 self.state = "PAUSED"
+                database.upsert_session(self.to_dict())
             except Exception as e:
                 log.error(f"Pause failed: {e}")
 
@@ -273,6 +351,7 @@ class CastSession:
             try:
                 self.cast.media_controller.play()
                 self.state = "PLAYING"
+                database.upsert_session(self.to_dict())
             except Exception as e:
                 log.error(f"Resume failed: {e}")
 
@@ -282,6 +361,7 @@ class CastSession:
             try:
                 self.cast.media_controller.seek(position)
                 self.current_time = position
+                database.upsert_session(self.to_dict())
             except Exception as e:
                 log.error(f"Seek failed: {e}")
 
@@ -348,6 +428,7 @@ class CastSession:
                 now = time.time()
                 if now - last_save >= PROGRESS_INTERVAL:
                     update_abs_progress(self.book_id, self.current_time, self.duration)
+                    database.upsert_session(self.to_dict())
                     last_save = now
 
                 if self.state in ("IDLE",) and self.current_time > 10:
@@ -497,15 +578,10 @@ def resolve_device_name(query: Optional[str]) -> tuple[str, str]:
 
 @app.get("/api/devices")
 def api_devices():
-    devices = discover_devices()
-    # Mark which device is the default (fuzzy match against DEFAULT_DEVICE)
-    if DEFAULT_DEVICE:
-        match = fuzzy_match_device(DEFAULT_DEVICE, devices)
-        for d in devices:
-            d["is_default"] = (match is not None and d["name"] == match["name"])
-    else:
-        for d in devices:
-            d["is_default"] = False
+    force = request.args.get("refresh") == "1"
+    if force or database.devices_stale():
+        _refresh_devices(force=True)
+    devices = database.get_devices_cached()
     return jsonify(devices)
 
 
@@ -539,19 +615,22 @@ def api_resolve_device():
 @app.get("/api/libraries")
 def api_libraries():
     try:
-        return jsonify(get_libraries())
+        force = request.args.get("refresh") == "1"
+        if force or database.libraries_stale():
+            _refresh_libraries_and_series(force=force)
+        return jsonify(database.get_libraries_cached())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.get("/api/libraries/<library_id>/series")
 def api_series(library_id):
     try:
-        # ABS returns { results: [{id, name, nameIgnorePrefix, ...}], total, ... }
-        data = abs_get(f"/libraries/{library_id}/series?limit=500&sort=name")
-        results = data.get("results", [])
-        # Normalise to just id + name for the UI
-        series = [{"id": s["id"], "name": s.get("name") or s.get("nameIgnorePrefix") or s["id"]} for s in results]
-        return jsonify(series)
+        force = request.args.get("refresh") == "1"
+        if force or database.series_stale(library_id):
+            _refresh_libraries_and_series(force=force)
+        cached = database.get_series_cached(library_id)
+        # Return shape the UI expects: id + name
+        return jsonify([{"id": s["id"], "name": s["name"]} for s in cached])
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -650,6 +729,12 @@ def _evict_terminal_sessions():
     for sid in to_delete:
         del cast_sessions[sid]
         log.info(f"Evicted terminal session {sid}")
+
+@app.get("/api/sessions/history")
+def api_session_history():
+    limit = int(request.args.get("limit", 50))
+    return jsonify(database.get_session_history(limit))
+
 
 @app.get("/api/sessions")
 def api_sessions():
@@ -852,49 +937,50 @@ def qr_play():
 @app.get("/api/series-lookup")
 def api_series_lookup():
     """
-    Helper endpoint for building QR code URLs.
-    Returns all series across all libraries with their IDs and a ready-made /play URL.
-    Optionally filter by ?q=<fuzzy name>.
+    Returns all series across all libraries from cache (with cover URLs and QR URLs).
+    Pass ?refresh=1 to force a fresh pull from ABS.
     """
+    force = request.args.get("refresh") == "1"
     q = request.args.get("q", "").strip().lower()
-    device = request.args.get("device", DEFAULT_DEVICE or "").strip()
 
-    try:
-        libraries = get_libraries()
-        results = []
-        for lib in libraries:
-            try:
-                series_list = abs_get(f"/libraries/{lib['id']}/series?limit=500&sort=name").get("results", [])
-                for s in series_list:
-                    name = s.get("name") or s.get("nameIgnorePrefix") or s["id"]
-                    if q and q not in name.lower():
-                        continue
-                    params = f"library={lib['id']}&series={s['id']}"
-                    if device:
-                        params += f"&device={device}"
-                    # Get the first book's ID for the cover image
-                    cover_item_id = None
-                    try:
-                        books = get_series_books(lib["id"], s["id"])
-                        if books:
-                            cover_item_id = books[0]["id"]
-                    except Exception:
-                        pass
-                    results.append({
-                        "library_id": lib["id"],
-                        "library_name": lib.get("name", ""),
-                        "series_id": s["id"],
-                        "series_name": name,
-                        "qr_url": f"/play?{params}",
-                        "book_count": s.get("numBooks", "?"),
-                        "cover_item_id": cover_item_id,
-                        "cover_url": f"{ABS_URL}/api/items/{cover_item_id}/cover?token={ABS_TOKEN}" if cover_item_id else None,
-                    })
-            except Exception as e:
-                log.warning(f"Series lookup failed for library {lib['id']}: {e}")
-        return jsonify(results)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    if force or database.series_stale():
+        _refresh_libraries_and_series(force=force)
+
+    results = database.get_series_cached()
+    if q:
+        results = [s for s in results if q in s["name"].lower()]
+    return jsonify(results)
+
+
+@app.get("/api/cache/status")
+def api_cache_status():
+    """Return cache staleness info for the dashboard."""
+    conn = database.get_conn()
+    lib_row   = conn.execute("SELECT COUNT(*) as n, MIN(refreshed_at) as oldest FROM libraries").fetchone()
+    ser_row   = conn.execute("SELECT COUNT(*) as n, MIN(refreshed_at) as oldest FROM series").fetchone()
+    dev_row   = conn.execute("SELECT COUNT(*) as n, MIN(refreshed_at) as oldest FROM devices").fetchone()
+    sess_row  = conn.execute("SELECT COUNT(*) as n FROM sessions").fetchone()
+    return jsonify({
+        "libraries":  {"count": lib_row["n"], "stale": database.libraries_stale(), "oldest": lib_row["oldest"]},
+        "series":     {"count": ser_row["n"], "stale": database.series_stale(),    "oldest": ser_row["oldest"]},
+        "devices":    {"count": dev_row["n"], "stale": database.devices_stale(),   "oldest": dev_row["oldest"]},
+        "sessions":   {"total": sess_row["n"]},
+        "ttls": {
+            "libraries_s": database.CACHE_TTL_LIBRARIES,
+            "series_s":    database.CACHE_TTL_SERIES,
+            "devices_s":   database.CACHE_TTL_DEVICES,
+        }
+    })
+
+
+@app.post("/api/cache/refresh")
+def api_cache_refresh():
+    """Force a full cache refresh (libraries, series, devices) in the background."""
+    def _do():
+        _refresh_libraries_and_series(force=True)
+        _refresh_devices(force=True)
+    threading.Thread(target=_do, daemon=True).start()
+    return jsonify({"ok": True, "message": "Refresh started in background"})
 
 
 @app.get("/series")
@@ -914,4 +1000,9 @@ def health():
 if __name__ == "__main__":
     log.info(f"Starting ABS Cast Bridge on {HOST_IP}:{PORT}")
     log.info(f"ABS URL: {ABS_URL}")
+    # Initialise database
+    database.init_db()
+    # Start background cache refresh thread
+    refresh_thread = threading.Thread(target=_background_refresh, daemon=True, name="cache-refresh")
+    refresh_thread.start()
     app.run(host=HOST_IP, port=PORT, debug=False)

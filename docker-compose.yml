@@ -6,8 +6,18 @@ services:
       ABS_URL: ${ABS_URL:-http://localhost:13378}
       ABS_TOKEN: ${ABS_TOKEN}
       DEFAULT_DEVICE: ${DEFAULT_DEVICE:-}   # Fuzzy friendly name, e.g. "Kitchen" or "Living Room"
-      SERIES_RESTART_TAIL_PCT: ${SERIES_RESTART_TAIL_PCT:-0.05}  # Restart from 0 if within last X% of book
+      SERIES_RESTART_TAIL_PCT: ${SERIES_RESTART_TAIL_PCT:-0.05}
+      PROGRESS_INTERVAL: 15
+      DB_PATH: /data/abscast.db
+      CACHE_TTL_LIBRARIES: 600   # 10 min
+      CACHE_TTL_SERIES: 600      # 10 min
+      CACHE_TTL_DEVICES: 300     # 5 min
+      CACHE_REFRESH_INTERVAL: 60 # Background check every 60s
       HOST_IP: 0.0.0.0
       PORT: 8123
-      PROGRESS_INTERVAL: 15     # Seconds between ABS progress saves
+    volumes:
+      - abscast-data:/data
     restart: unless-stopped
+
+volumes:
+  abscast-data:
