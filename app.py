@@ -61,7 +61,7 @@ def abs_patch(path: str, data: dict) -> dict:
     r = requests.patch(f"{ABS_URL}/api{path}", json=data,
                        headers={"Authorization": f"Bearer {ABS_TOKEN}"}, timeout=10)
     r.raise_for_status()
-    return r.json()
+    return r.json() if r.content else {}
 
 def get_libraries() -> list[dict]:
     return abs_get("/libraries").get("libraries", [])
