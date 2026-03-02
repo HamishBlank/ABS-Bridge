@@ -608,6 +608,262 @@ def api_stop(session_id):
     s.stop()
     return jsonify({"ok": True})
 
+
+# ---------------------------------------------------------------------------
+# QR Code cast endpoint
+# GET /play?library=<library_id>&series=<series_id>&device=<fuzzy_name>
+#
+# Designed to be the target of a QR code. Opens in any browser, immediately
+# starts casting, and returns a confirmation page. device is optional if
+# DEFAULT_DEVICE is configured.
+# ---------------------------------------------------------------------------
+
+QR_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{title}</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=Space+Mono&display=swap" rel="stylesheet">
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    background: #0a0a0f;
+    color: #e8e8f0;
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }}
+  .card {{
+    background: #111118;
+    border: 1px solid #2a2a3a;
+    border-radius: 16px;
+    padding: 40px 36px;
+    max-width: 420px;
+    width: 100%;
+    text-align: center;
+  }}
+  .icon {{ font-size: 48px; margin-bottom: 20px; }}
+  .status {{
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 3px;
+    font-family: 'Space Mono', monospace;
+    margin-bottom: 16px;
+    color: {status_color};
+  }}
+  h1 {{
+    font-size: 22px; font-weight: 800;
+    line-height: 1.2; margin-bottom: 10px;
+  }}
+  .subtitle {{
+    font-size: 13px; color: #666680;
+    font-family: 'Space Mono', monospace;
+    line-height: 1.6;
+    margin-bottom: 28px;
+  }}
+  .device-badge {{
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(124,106,247,0.1);
+    border: 1px solid rgba(124,106,247,0.25);
+    border-radius: 20px;
+    padding: 8px 16px;
+    font-size: 13px; font-weight: 600;
+    color: #a090ff;
+    margin-bottom: 28px;
+  }}
+  .error-box {{
+    background: rgba(240,74,106,0.1);
+    border: 1px solid rgba(240,74,106,0.3);
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 13px; color: #f04a6a;
+    font-family: 'Space Mono', monospace;
+    line-height: 1.5;
+    margin-bottom: 24px;
+    text-align: left;
+  }}
+  .resume-info {{
+    font-size: 12px; color: #666680;
+    font-family: 'Space Mono', monospace;
+  }}
+  .resume-info span {{ color: #4af0a0; }}
+  a {{
+    color: #7c6af7; text-decoration: none;
+    font-size: 13px;
+    display: block; margin-top: 24px;
+    font-family: 'Space Mono', monospace;
+  }}
+  a:hover {{ text-decoration: underline; }}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">{icon}</div>
+  <div class="status">{status_label}</div>
+  <h1>{heading}</h1>
+  <div class="subtitle">{subtitle}</div>
+  {extra_html}
+  <a href="/">← Open dashboard</a>
+</div>
+</body>
+</html>"""
+
+
+def _render_qr_page(icon, status_label, status_color, heading, subtitle, extra_html=""):
+    return QR_PAGE.format(
+        title=heading,
+        icon=icon,
+        status_label=status_label,
+        status_color=status_color,
+        heading=heading,
+        subtitle=subtitle,
+        extra_html=extra_html,
+    )
+
+
+@app.get("/play")
+def qr_play():
+    """
+    QR code cast trigger.
+    Query params:
+      library  — ABS library ID (required)
+      series   — ABS series ID (required)
+      device   — fuzzy device name (optional if DEFAULT_DEVICE is set)
+    """
+    library_id = request.args.get("library", "").strip()
+    series_id  = request.args.get("series", "").strip()
+    device_query = request.args.get("device", "").strip()
+
+    if not library_id or not series_id:
+        return _render_qr_page(
+            "⚠️", "Configuration Error", "#f04a6a",
+            "Missing Parameters",
+            "This QR code is missing library or series parameters.",
+            '<div class="error-box">Expected: /play?library=&lt;id&gt;&amp;series=&lt;id&gt;</div>',
+        ), 400
+
+    # Resolve device
+    try:
+        resolved_device, _ = resolve_device_name(device_query)
+    except ValueError as e:
+        return _render_qr_page(
+            "📡", "Device Error", "#f04a6a",
+            "Device Not Found",
+            "Could not find a matching Chromecast on the network.",
+            f'<div class="error-box">{str(e)}</div>',
+        ), 404
+
+    # Find target book
+    try:
+        books = get_series_books(library_id, series_id)
+        if not books:
+            return _render_qr_page(
+                "📚", "Not Found", "#f04a6a",
+                "No Books Found",
+                "No books were found for this series in AudioBookshelf.",
+                f'<div class="error-box">library={library_id}<br>series={series_id}</div>',
+            ), 404
+
+        target, series_restart = find_target_book(books)
+        if not target:
+            return _render_qr_page(
+                "📚", "Not Found", "#f04a6a",
+                "No Book to Play",
+                "Could not determine which book to play next.",
+            ), 404
+
+        book_title = target.get("media", {}).get("metadata", {}).get("title", "Unknown")
+        series_name = (
+            books[0].get("media", {}).get("metadata", {}).get("series", [{}])[0].get("name", "")
+            if books else ""
+        )
+        stream_url, start_time = get_stream_url(target["id"], series_restart=series_restart)
+
+        session = CastSession(
+            session_id=str(uuid.uuid4())[:8],
+            device_name=resolved_device,
+            book_id=target["id"],
+            book_title=book_title,
+            stream_url=stream_url,
+            start_time=start_time,
+        )
+        cast_sessions[session.session_id] = session
+        session.start()
+
+        # Build resume info line
+        if series_restart:
+            resume_line = '<div class="resume-info">↺ Series restart — beginning from book 1</div>'
+        elif start_time > 60:
+            h = int(start_time // 3600)
+            m = int((start_time % 3600) // 60)
+            s = int(start_time % 60)
+            ts = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+            resume_line = f'<div class="resume-info">Resuming from <span>{ts}</span></div>'
+        else:
+            resume_line = '<div class="resume-info">Starting from the beginning</div>'
+
+        subtitle = series_name if series_name else "AudioBookshelf"
+        extra = f"""
+            <div class="device-badge">📡 {resolved_device}</div>
+            {resume_line}
+        """
+
+        return _render_qr_page(
+            "🎧", "Now Casting", "#4af0a0",
+            book_title,
+            subtitle,
+            extra,
+        )
+
+    except Exception as e:
+        log.exception("QR play error")
+        return _render_qr_page(
+            "💥", "Error", "#f04a6a",
+            "Something Went Wrong",
+            "An unexpected error occurred while starting playback.",
+            f'<div class="error-box">{str(e)}</div>',
+        ), 500
+
+
+@app.get("/api/series-lookup")
+def api_series_lookup():
+    """
+    Helper endpoint for building QR code URLs.
+    Returns all series across all libraries with their IDs and a ready-made /play URL.
+    Optionally filter by ?q=<fuzzy name>.
+    """
+    q = request.args.get("q", "").strip().lower()
+    device = request.args.get("device", DEFAULT_DEVICE or "").strip()
+
+    try:
+        libraries = get_libraries()
+        results = []
+        for lib in libraries:
+            try:
+                series_list = abs_get(f"/libraries/{lib['id']}/series?limit=500&sort=name").get("results", [])
+                for s in series_list:
+                    name = s.get("name") or s.get("nameIgnorePrefix") or s["id"]
+                    if q and q not in name.lower():
+                        continue
+                    params = f"library={lib['id']}&series={s['id']}"
+                    if device:
+                        params += f"&device={device}"
+                    results.append({
+                        "library_id": lib["id"],
+                        "library_name": lib.get("name", ""),
+                        "series_id": s["id"],
+                        "series_name": name,
+                        "qr_url": f"/play?{params}",
+                        "book_count": s.get("numBooks", "?"),
+                    })
+            except Exception as e:
+                log.warning(f"Series lookup failed for library {lib['id']}: {e}")
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.get("/")
 def index():
     from flask import send_from_directory
