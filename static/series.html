@@ -254,7 +254,96 @@
   }
   #errorToast.show { transform: translateX(-50%) translateY(0); }
 
-  /* Casting overlay on card */
+  /* ── Playback bar ─────────────────────────────────────────────────────── */
+  #playbar {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: var(--header-bg);
+    padding: 0 16px 12px;
+    z-index: 50;
+    transform: translateY(100%);
+    transition: transform 0.35s cubic-bezier(0.34,1.2,0.64,1);
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.35);
+  }
+  #playbar.visible { transform: translateY(0); }
+
+  /* push grid up when bar is showing */
+  body.bar-visible .container { padding-bottom: 156px; }
+
+  .bar-progress-row {
+    display: flex; align-items: center; gap: 10px;
+    padding-top: 10px; margin-bottom: 6px;
+  }
+  .bar-time {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px; color: rgba(255,255,255,0.45);
+    flex-shrink: 0; min-width: 38px;
+  }
+  .bar-time.right { text-align: right; }
+
+  .progress-track {
+    flex: 1; height: 6px;
+    background: rgba(255,255,255,0.12);
+    border-radius: 3px;
+    cursor: pointer;
+    position: relative;
+    touch-action: none;
+  }
+  .progress-track:hover { height: 9px; margin-top: -1.5px; }
+  .progress-fill-bar {
+    height: 100%; border-radius: 3px;
+    background: var(--accent);
+    pointer-events: none;
+    transition: width 0.5s linear;
+  }
+
+  .bar-meta {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 8px; padding-top: 8px;
+  }
+  .bar-text { flex: 1; min-width: 0; }
+  .bar-title {
+    font-size: 14px; font-weight: 800;
+    color: #fff;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .bar-sub {
+    font-size: 11px; color: rgba(255,255,255,0.45);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    margin-top: 1px;
+  }
+
+  .bar-controls {
+    display: flex; align-items: center; gap: 4px;
+    flex-shrink: 0;
+  }
+  .ctrl {
+    background: none; border: none; cursor: pointer;
+    color: rgba(255,255,255,0.75);
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    transition: background 0.15s, color 0.15s, transform 0.1s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .ctrl:hover { background: rgba(255,255,255,0.1); color: #fff; }
+  .ctrl:active { transform: scale(0.88); }
+  .ctrl.primary {
+    background: var(--accent);
+    color: #fff;
+    width: 46px; height: 46px;
+    font-size: 20px;
+    box-shadow: 0 3px 12px rgba(249,115,22,0.45);
+  }
+  .ctrl.primary:hover { background: #ea6c0a; }
+  .ctrl-label {
+    font-family: 'Nunito', sans-serif;
+    font-size: 9px; font-weight: 800;
+    display: block; text-align: center; margin-top: -2px;
+    color: rgba(255,255,255,0.5);
+    line-height: 1;
+    pointer-events: none;
+  }
   .series-card.casting .cover-wrap::after {
     content: '🎧';
     position: absolute; inset: 0;
@@ -477,6 +566,141 @@ function showError(msg) {
 function escHtml(s) {
   return String(s || '').replace(/[&<>"']/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+<!-- Playback bar -->
+<div id="playbar">
+  <div class="bar-progress-row">
+    <span class="bar-time" id="barElapsed">0:00</span>
+    <div class="progress-track" id="progressTrack">
+      <div class="progress-fill-bar" id="progressFill" style="width:0%"></div>
+    </div>
+    <span class="bar-time right" id="barRemaining">0:00</span>
+  </div>
+  <div class="bar-meta">
+    <div class="bar-text">
+      <div class="bar-title" id="barTitle">—</div>
+      <div class="bar-sub" id="barSub">—</div>
+    </div>
+    <div class="bar-controls">
+      <button class="ctrl" onclick="skipSeries(-1)" title="Previous series">⏮<span class="ctrl-label">Series</span></button>
+      <button class="ctrl" onclick="seekRel(-30)" title="Rewind 30s">↺<span class="ctrl-label">−30s</span></button>
+      <button class="ctrl primary" id="playPauseBtn" onclick="togglePlayPause()">⏸</button>
+      <button class="ctrl" onclick="seekRel(30)" title="Forward 30s">↻<span class="ctrl-label">+30s</span></button>
+      <button class="ctrl" onclick="skipSeries(1)" title="Next series">⏭<span class="ctrl-label">Series</span></button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Playback bar ───────────────────────────────────────────────────────────
+let activeSession = null;
+let pollTimer = null;
+
+function formatTime(s) {
+  if (!s || isNaN(s)) return '0:00';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  return h > 0
+    ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
+    : `${m}:${String(sec).padStart(2,'0')}`;
+}
+
+function updateBar(session) {
+  activeSession = session;
+  const bar = document.getElementById('playbar');
+  const pct = session.duration > 0
+    ? Math.min(100, (session.current_time / session.duration) * 100)
+    : 0;
+
+  document.getElementById('barTitle').textContent = session.book_title || '—';
+  const sub = [session.series_name, session.book_author].filter(Boolean).join(' · ');
+  document.getElementById('barSub').textContent = sub || session.device_name;
+  document.getElementById('barElapsed').textContent = formatTime(session.current_time);
+  document.getElementById('barRemaining').textContent = '−' + formatTime(session.duration - session.current_time);
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('playPauseBtn').textContent =
+    session.state === 'PAUSED' ? '▶' : '⏸';
+
+  bar.classList.add('visible');
+  document.body.classList.add('bar-visible');
+}
+
+function hideBar() {
+  document.getElementById('playbar').classList.remove('visible');
+  document.body.classList.remove('bar-visible');
+  activeSession = null;
+}
+
+async function pollActiveSession() {
+  try {
+    const sessions = await api('/api/sessions');
+    const live = sessions.find(s => ['PLAYING','PAUSED','BUFFERING','LOADING'].includes(s.state));
+    if (live) {
+      updateBar(live);
+    } else {
+      hideBar();
+    }
+  } catch { /* ignore */ }
+}
+
+// Start polling when page loads
+setInterval(pollActiveSession, 3000);
+pollActiveSession();
+
+// Progress bar scrubbing
+document.getElementById('progressTrack').addEventListener('click', async e => {
+  if (!activeSession) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const pct = (e.clientX - rect.left) / rect.width;
+  const pos = pct * activeSession.duration;
+  await api(`/api/sessions/${activeSession.session_id}/seek`, {
+    method: 'POST',
+    body: JSON.stringify({ position: Math.max(0, pos) }),
+  });
+  activeSession.current_time = pos;
+  updateBar(activeSession);
+});
+
+async function togglePlayPause() {
+  if (!activeSession) return;
+  const endpoint = activeSession.state === 'PAUSED' ? 'resume' : 'pause';
+  try {
+    const updated = await api(`/api/sessions/${activeSession.session_id}/${endpoint}`, { method: 'POST' });
+    updateBar(updated);
+  } catch (e) { showError(e.message); }
+}
+
+async function seekRel(delta) {
+  if (!activeSession) return;
+  const pos = Math.max(0, Math.min(activeSession.duration, activeSession.current_time + delta));
+  try {
+    const updated = await api(`/api/sessions/${activeSession.session_id}/seek`, {
+      method: 'POST',
+      body: JSON.stringify({ position: pos }),
+    });
+    updateBar(updated);
+  } catch (e) { showError(e.message); }
+}
+
+// Skip to adjacent series in the current library tab
+async function skipSeries(dir) {
+  const filtered = activeLibId
+    ? allSeries.filter(s => s.library_id === activeLibId)
+    : allSeries;
+  if (!filtered.length || !activeSession) return;
+
+  // Find which series is currently playing by matching series_name
+  const curIdx = filtered.findIndex(s => s.series_name === activeSession.series_name);
+  const nextIdx = curIdx + dir;
+  if (nextIdx < 0 || nextIdx >= filtered.length) return;
+
+  // Stop current session then start new one
+  try {
+    await api(`/api/sessions/${activeSession.session_id}/stop`, { method: 'POST' });
+  } catch { /* already stopped */ }
+  await playSeries(nextIdx);
 }
 </script>
 </body>

@@ -222,10 +222,12 @@ class CastSession:
     current_time: float = 0.0
     state: str = "IDLE"   # IDLE | LOADING | PLAYING | PAUSED | BUFFERING | DONE | STOPPED | ERROR
     error: str = ""
+    book_author: str = ""
+    series_name: str = ""
     cast: object = field(default=None, repr=False)
     _stop: threading.Event = field(default_factory=threading.Event, repr=False)
     _thread: object = field(default=None, repr=False)
-    _stopped_at: float = field(default=0.0, repr=False)  # epoch time when stopped/done
+    _stopped_at: float = field(default=0.0, repr=False)
 
     def to_dict(self) -> dict:
         return {
@@ -233,6 +235,8 @@ class CastSession:
             "device_name": self.device_name,
             "book_id": self.book_id,
             "book_title": self.book_title,
+            "book_author": self.book_author,
+            "series_name": self.series_name,
             "stream_url": self.stream_url,
             "start_time": self.start_time,
             "duration": self.duration,
@@ -255,6 +259,31 @@ class CastSession:
                 self.cast.quit_app()
             except Exception:
                 pass
+
+    def pause(self):
+        if self.cast:
+            try:
+                self.cast.media_controller.pause()
+                self.state = "PAUSED"
+            except Exception as e:
+                log.error(f"Pause failed: {e}")
+
+    def resume(self):
+        if self.cast:
+            try:
+                self.cast.media_controller.play()
+                self.state = "PLAYING"
+            except Exception as e:
+                log.error(f"Resume failed: {e}")
+
+    def seek(self, position: float):
+        """Seek to absolute position in seconds."""
+        if self.cast:
+            try:
+                self.cast.media_controller.seek(position)
+                self.current_time = position
+            except Exception as e:
+                log.error(f"Seek failed: {e}")
 
     def _run(self):
         browser = None
@@ -572,6 +601,18 @@ def api_cast():
             return jsonify({"error": "No book found in series"}), 404
 
         book_title = target.get("media", {}).get("metadata", {}).get("title", "Unknown")
+        book_author = target.get("media", {}).get("metadata", {}).get("authorName", "")
+        # Extract series name robustly
+        series_raw = target.get("media", {}).get("metadata", {}).get("series")
+        series_display = ""
+        if isinstance(series_raw, str):
+            series_display = series_raw
+        elif isinstance(series_raw, list) and series_raw:
+            first = series_raw[0]
+            series_display = first.get("name", "") if isinstance(first, dict) else str(first)
+        elif isinstance(series_raw, dict):
+            first = next(iter(series_raw.values()), None)
+            series_display = first.get("name", "") if isinstance(first, dict) else str(first or "")
         stream_url, start_time = get_stream_url(target["id"], series_restart=series_restart)
 
         session = CastSession(
@@ -579,6 +620,8 @@ def api_cast():
             device_name=resolved_device,
             book_id=target["id"],
             book_title=book_title,
+            book_author=book_author,
+            series_name=series_display,
             stream_url=stream_url,
             start_time=start_time,
         )
@@ -628,6 +671,34 @@ def api_stop(session_id):
     s.stop()
     del cast_sessions[session_id]
     return jsonify({"ok": True})
+
+@app.post("/api/sessions/<session_id>/pause")
+def api_pause(session_id):
+    s = cast_sessions.get(session_id)
+    if not s:
+        return jsonify({"error": "Not found"}), 404
+    s.pause()
+    return jsonify(s.to_dict())
+
+@app.post("/api/sessions/<session_id>/resume")
+def api_resume(session_id):
+    s = cast_sessions.get(session_id)
+    if not s:
+        return jsonify({"error": "Not found"}), 404
+    s.resume()
+    return jsonify(s.to_dict())
+
+@app.post("/api/sessions/<session_id>/seek")
+def api_seek(session_id):
+    s = cast_sessions.get(session_id)
+    if not s:
+        return jsonify({"error": "Not found"}), 404
+    body = request.json or {}
+    position = body.get("position")
+    if position is None:
+        return jsonify({"error": "position required"}), 400
+    s.seek(float(position))
+    return jsonify(s.to_dict())
 
 
 # ---------------------------------------------------------------------------
@@ -710,13 +781,13 @@ def qr_play():
             ), 404
 
         book_title = target.get("media", {}).get("metadata", {}).get("title", "Unknown")
+        book_author = target.get("media", {}).get("metadata", {}).get("authorName", "")
         series_raw = books[0].get("media", {}).get("metadata", {}).get("series") if books else None
         log.debug(f"series_raw type={type(series_raw).__name__} value={series_raw!r}")
         series_name = ""
         if isinstance(series_raw, str):
             series_name = series_raw
         elif isinstance(series_raw, dict):
-            # {"0": {"name": "..."}} or {"name": "..."}
             first = next(iter(series_raw.values()), None)
             if isinstance(first, dict):
                 series_name = first.get("name", "")
@@ -735,6 +806,8 @@ def qr_play():
             device_name=resolved_device,
             book_id=target["id"],
             book_title=book_title,
+            book_author=book_author,
+            series_name=series_name,
             stream_url=stream_url,
             start_time=start_time,
         )
