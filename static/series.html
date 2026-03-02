@@ -276,7 +276,7 @@
   </div>
   <div class="header-actions">
     <button class="btn btn-orange" id="loadBtn" onclick="loadSeries()">
-      Load Books
+      ↺ Reload
     </button>
     <a href="/" class="btn btn-light">⚙ Dashboard</a>
   </div>
@@ -301,7 +301,8 @@
 <div id="errorToast"></div>
 
 <script>
-// ── Config ────────────────────────────────────────────────────────────────
+// Auto-load on page start
+window.addEventListener('DOMContentLoaded', loadSeries);
 const API_BASE = window.location.origin;
 
 function getCfg() {
@@ -326,6 +327,7 @@ let allSeries = [];   // flat list across all libraries
 let libraries = [];
 let activeLibId = null;
 let castingSeriesId = null;
+let cardSeriesMap = {};  // index → series object, rebuilt on each renderGrid()
 
 // ── Load ──────────────────────────────────────────────────────────────────
 async function loadSeries() {
@@ -390,7 +392,7 @@ function renderGrid() {
     return;
   }
 
-  const cards = filtered.map(s => {
+  const cards = filtered.map((s, i) => {
     const isCasting = castingSeriesId === s.series_id;
     const coverHtml = s.cover_url
       ? `<img src="${escHtml(s.cover_url)}" alt="${escHtml(s.series_name)}"
@@ -399,10 +401,13 @@ function renderGrid() {
          <div class="cover-placeholder" style="display:none">📖</div>`
       : `<div class="cover-placeholder">📖</div>`;
 
+    // Store series data in a map keyed by index to avoid onclick injection
+    cardSeriesMap[i] = s;
+
     return `
       <div class="series-card ${isCasting ? 'casting' : ''}"
            id="sc-${escHtml(s.series_id)}"
-           onclick="playSeries(${JSON.stringify(s)})">
+           onclick="playSeries(${i})">
         <div class="cover-wrap">
           ${coverHtml}
           <div class="book-count-badge">${s.book_count} book${s.book_count != 1 ? 's' : ''}</div>
@@ -416,7 +421,9 @@ function renderGrid() {
 }
 
 // ── Cast ──────────────────────────────────────────────────────────────────
-async function playSeries(s) {
+async function playSeries(idx) {
+  const s = cardSeriesMap[idx];
+  if (!s) return;
   if (castingSeriesId === s.series_id) return; // already casting this one
   castingSeriesId = s.series_id;
   renderGrid(); // show casting overlay
