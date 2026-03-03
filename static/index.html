@@ -355,6 +355,10 @@
       <label>Default Chromecast Device <span style="color:var(--accent2)">(fuzzy name — partial match ok)</span></label>
       <input type="text" id="defaultDevice" placeholder="e.g. Kitchen, living room speaker, bedroom…" style="margin-bottom:0" />
     </div>
+    <div style="margin-bottom:10px">
+      <label>Kids View Tag Filter <span style="color:var(--muted);font-size:11px">(only series with this tag appear on the kids page — leave empty to show all)</span></label>
+      <input type="text" id="kidsTag" placeholder="e.g. For Flora" style="margin-bottom:0" />
+    </div>
     <button class="btn btn-secondary btn-sm" onclick="saveConfig()">💾 Save &amp; Connect</button>
     <div class="config-note">
       Token found in ABS → <b>Settings → Users → Your User → API Token</b>. Config is saved in localStorage.
@@ -458,6 +462,15 @@ function loadConfig() {
   if (saved.absUrl) document.getElementById('absUrl').value = saved.absUrl;
   if (saved.absToken) document.getElementById('absToken').value = saved.absToken;
   if (saved.defaultDevice) document.getElementById('defaultDevice').value = saved.defaultDevice;
+  if (saved.kidsTag !== undefined) document.getElementById('kidsTag').value = saved.kidsTag;
+  // Also pull server-side config to show env-configured values as hints
+  try {
+    const cfg = await api('/api/config');
+    if (!saved.kidsTag && cfg.kids_tag) {
+      document.getElementById('kidsTag').value = cfg.kids_tag;
+      document.getElementById('kidsTag').placeholder = cfg.kids_tag + ' (from server env)';
+    }
+  } catch { /* ignore */ }
   // Default: same origin
   API_BASE = saved.apiBase || window.location.origin;
 }
@@ -466,7 +479,8 @@ function saveConfig() {
   const absUrl = document.getElementById('absUrl').value.trim();
   const absToken = document.getElementById('absToken').value.trim();
   const defaultDevice = document.getElementById('defaultDevice').value.trim();
-  localStorage.setItem('abs_cast_config', JSON.stringify({ absUrl, absToken, defaultDevice, apiBase: API_BASE }));
+  const kidsTag = document.getElementById('kidsTag').value.trim();
+  localStorage.setItem('abs_cast_config', JSON.stringify({ absUrl, absToken, defaultDevice, kidsTag, apiBase: API_BASE }));
   toast('Config saved', 'success');
   checkHealth();
   loadLibraries();

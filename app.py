@@ -41,6 +41,9 @@ ABS_URL        = os.getenv("ABS_URL", "http://localhost:13378")
 # Set this to your public HTTPS URL (e.g. https://abs.ablank.life) so
 # Chromecasts can reach the stream. Falls back to ABS_URL if not set.
 ABS_PUBLIC_URL = os.getenv("ABS_PUBLIC_URL", "").rstrip("/") or ABS_URL
+# Tag used to filter the kids/series view. Books must have this tag to appear.
+# Leave empty to show all books. e.g. "For Flora"
+ABS_KIDS_TAG   = os.getenv("ABS_KIDS_TAG", "").strip()
 ABS_TOKEN = os.getenv("ABS_TOKEN", "")
 PROGRESS_INTERVAL = int(os.getenv("PROGRESS_INTERVAL", "15"))   # seconds
 HOST_IP = os.getenv("HOST_IP", "0.0.0.0")
@@ -60,7 +63,12 @@ discovery_lock = threading.Lock()
 # Background cache refresh
 # ---------------------------------------------------------------------------
 
-def _refresh_libraries_and_series(force: bool = False):
+def _book_has_kids_tag(book: dict) -> bool:
+    """Return True if ABS_KIDS_TAG is unset, or if the book has the tag."""
+    if not ABS_KIDS_TAG:
+        return True
+    tags = book.get("media", {}).get("tags") or []
+    return ABS_KIDS_TAG.lower() in [t.lower() for t in tags]
     """Fetch libraries + series from ABS and store in DB cache."""
     try:
         if force or database.libraries_stale():
@@ -85,9 +93,12 @@ def _refresh_libraries_and_series(force: bool = False):
                         book_count = 0
                         try:
                             books = get_series_books(lib["id"], s["id"])
-                            book_count = len(books)
-                            if books:
-                                cover_item_id = books[0]["id"]
+                            # Filter to kids-tagged books only (for series view)
+                            tagged = [b for b in books if _book_has_kids_tag(b)]
+                            book_count = len(tagged)
+                            if book_count == 0:
+                                continue  # skip series with no tagged books
+                            cover_item_id = tagged[0]["id"]
                         except Exception:
                             pass
                         enriched.append({
@@ -147,18 +158,21 @@ def abs_patch(path: str, data: dict) -> dict:
 def get_libraries() -> list[dict]:
     return abs_get("/libraries").get("libraries", [])
 
-def get_series_books(library_id: str, series_id: str) -> list[dict]:
+def get_series_books(library_id: str, series_id: str, kids_only: bool = False) -> list[dict]:
     """
     Return library items belonging to a series, ordered by series sequence.
+    If kids_only=True, filters to books with the ABS_KIDS_TAG tag.
 
     ABS does not expose a /series/{id}/books endpoint — books are fetched via
     the items endpoint with a base64-encoded series filter, which is the same
     mechanism the ABS web UI uses internally.
     """
-    # ABS filter format: "series.BASE64(series_id)"
     encoded = base64.b64encode(series_id.encode()).decode()
     data = abs_get(f"/libraries/{library_id}/items?filter=series.{encoded}&limit=500&sort=media.metadata.title")
     items = data.get("results", [])
+
+    if kids_only:
+        items = [b for b in items if _book_has_kids_tag(b)]
 
     def seq(item):
         """Extract the numeric series sequence for this specific series."""
@@ -171,7 +185,6 @@ def get_series_books(library_id: str, series_id: str) -> list[dict]:
                 for s in series_list:
                     if isinstance(s, dict) and (s.get("id") == series_id or s.get("name")):
                         return float(s.get("sequence") or 0)
-            # Fallback: top-level seriesSequence sometimes present on item
             return float(item.get("seriesSequence") or 0)
         except (ValueError, TypeError):
             return 0
@@ -598,7 +611,9 @@ def api_config():
         "default_device": DEFAULT_DEVICE,
         "progress_interval": PROGRESS_INTERVAL,
         "abs_url": ABS_URL,
+        "abs_public_url": ABS_PUBLIC_URL,
         "series_restart_tail_pct": SERIES_RESTART_TAIL_PCT,
+        "kids_tag": ABS_KIDS_TAG,
     })
 
 
@@ -665,6 +680,7 @@ def api_cast():
     # device_name: body > query param > DEFAULT_DEVICE (resolved fuzzy in all cases)
     device_query = body.get("device_name") or request.args.get("device") or ""
     book_id_override = body.get("book_id")
+    kids_only = bool(body.get("kids_only", False))
 
     if not all([library_id, series_id]):
         return jsonify({"error": "library_id and series_id are required"}), 400
@@ -675,7 +691,7 @@ def api_cast():
         return jsonify({"error": str(e)}), 400
 
     try:
-        books = get_series_books(library_id, series_id)
+        books = get_series_books(library_id, series_id, kids_only=kids_only)
         series_restart = False
         if book_id_override:
             target = next((b for b in books if b["id"] == book_id_override), None)
@@ -854,7 +870,7 @@ def qr_play():
 
     # Find target book
     try:
-        books = get_series_books(library_id, series_id)
+        books = get_series_books(library_id, series_id, kids_only=bool(ABS_KIDS_TAG))
         if not books:
             return _render_qr_page(
                 "📚", "Not Found", "#f04a6a",

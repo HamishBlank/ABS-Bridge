@@ -6,6 +6,7 @@ services:
       ABS_URL: ${ABS_URL:-http://localhost:13378}           # Internal address for API calls (bypasses Authelia)
       ABS_PUBLIC_URL: ${ABS_PUBLIC_URL:-}                   # Public HTTPS URL for Chromecast stream/cover URLs (e.g. https://abs.ablank.life)
       ABS_TOKEN: ${ABS_TOKEN}
+      ABS_KIDS_TAG: ${ABS_KIDS_TAG:-}                       # Tag to filter kids/series view (e.g. "For Flora"). Empty = show all.
       DEFAULT_DEVICE: ${DEFAULT_DEVICE:-}   # Fuzzy friendly name, e.g. "Kitchen" or "Living Room"
       SERIES_RESTART_TAIL_PCT: ${SERIES_RESTART_TAIL_PCT:-0.05}
       PROGRESS_INTERVAL: 15

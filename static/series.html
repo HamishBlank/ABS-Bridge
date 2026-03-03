@@ -527,6 +527,7 @@ async function playSeries(idx) {
       body: JSON.stringify({
         library_id: s.library_id,
         series_id: s.series_id,
+        kids_only: true,
         device_name: device || undefined,
       }),
     });
