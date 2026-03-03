@@ -37,7 +37,6 @@ def get_conn() -> sqlite3.Connection:
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
         _local.conn = conn
     return _local.conn
 
@@ -55,8 +54,16 @@ def tx():
 
 
 def init_db():
-    """Create tables if they don't exist."""
+    """Create tables if they don't exist, and run any needed migrations."""
     with tx() as conn:
+        # Migration: drop series table if it has a FK constraint (legacy schema)
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='series'"
+        ).fetchone()
+        if row and "FOREIGN KEY" in (row["sql"] or ""):
+            log.info("Migrating series table: removing FK constraint")
+            conn.execute("DROP TABLE series")
+
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS libraries (
                 id          TEXT PRIMARY KEY,
@@ -73,8 +80,7 @@ def init_db():
                 cover_item_id   TEXT,
                 cover_url       TEXT,
                 qr_url          TEXT,
-                refreshed_at    REAL NOT NULL DEFAULT 0,
-                FOREIGN KEY (library_id) REFERENCES libraries(id)
+                refreshed_at    REAL NOT NULL DEFAULT 0
             );
 
             CREATE INDEX IF NOT EXISTS idx_series_library ON series(library_id);
@@ -126,7 +132,6 @@ def get_libraries_cached() -> list[dict]:
 def upsert_libraries(libs: list[dict]):
     now = time.time()
     with tx() as conn:
-        conn.execute("DELETE FROM series")   # must go before libraries due to FK
         conn.execute("DELETE FROM libraries")
         conn.executemany(
             "INSERT OR REPLACE INTO libraries (id, name, media_type, refreshed_at) VALUES (?,?,?,?)",

@@ -69,6 +69,9 @@ def _book_has_kids_tag(book: dict) -> bool:
         return True
     tags = book.get("media", {}).get("tags") or []
     return ABS_KIDS_TAG.lower() in [t.lower() for t in tags]
+
+
+def _refresh_libraries_and_series(force: bool = False):
     """Fetch libraries + series from ABS and store in DB cache."""
     try:
         if force or database.libraries_stale():
