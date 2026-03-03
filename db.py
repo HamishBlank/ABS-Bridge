@@ -126,6 +126,7 @@ def get_libraries_cached() -> list[dict]:
 def upsert_libraries(libs: list[dict]):
     now = time.time()
     with tx() as conn:
+        conn.execute("DELETE FROM series")   # must go before libraries due to FK
         conn.execute("DELETE FROM libraries")
         conn.executemany(
             "INSERT OR REPLACE INTO libraries (id, name, media_type, refreshed_at) VALUES (?,?,?,?)",

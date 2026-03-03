@@ -81,11 +81,12 @@ def _book_has_kids_tag(book: dict) -> bool:
             if force or database.series_stale(lib["id"]):
                 try:
                     raw_series = abs_get(f"/libraries/{lib['id']}/series?limit=500&sort=name").get("results", [])
+                    # Resolve default device once per library refresh
+                    cached_devices = database.get_devices_cached()
+                    default_device = next((d["name"] for d in cached_devices if d.get("is_default")), DEFAULT_DEVICE or "")
                     enriched = []
                     for s in raw_series:
                         name = s.get("name") or s.get("nameIgnorePrefix") or s["id"]
-                        cfg = database.get_devices_cached()
-                        default_device = next((d["name"] for d in cfg if d.get("is_default")), DEFAULT_DEVICE or "")
                         params = f"library={lib['id']}&series={s['id']}"
                         if default_device:
                             params += f"&device={default_device}"
@@ -93,7 +94,6 @@ def _book_has_kids_tag(book: dict) -> bool:
                         book_count = 0
                         try:
                             books = get_series_books(lib["id"], s["id"])
-                            # Filter to kids-tagged books only (for series view)
                             tagged = [b for b in books if _book_has_kids_tag(b)]
                             book_count = len(tagged)
                             if book_count == 0:
@@ -109,7 +109,8 @@ def _book_has_kids_tag(book: dict) -> bool:
                             "cover_url": f"{ABS_PUBLIC_URL}/api/items/{cover_item_id}/cover?token={ABS_TOKEN}" if cover_item_id else None,
                             "qr_url": f"/play?{params}",
                         })
-                    database.upsert_series(lib["id"], enriched)
+                    if enriched:  # only upsert if we got results — don't wipe on empty response
+                        database.upsert_series(lib["id"], enriched)
                 except Exception as e:
                     log.warning(f"Series refresh failed for library {lib['id']}: {e}")
     except Exception as e:
