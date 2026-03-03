@@ -3,7 +3,8 @@ services:
     build: .
     network_mode: host          # Required for mDNS Chromecast discovery
     environment:
-      ABS_URL: ${ABS_URL:-http://localhost:13378}
+      ABS_URL: ${ABS_URL:-http://localhost:13378}           # Internal address for API calls (bypasses Authelia)
+      ABS_PUBLIC_URL: ${ABS_PUBLIC_URL:-}                   # Public HTTPS URL for Chromecast stream/cover URLs (e.g. https://abs.ablank.life)
       ABS_TOKEN: ${ABS_TOKEN}
       DEFAULT_DEVICE: ${DEFAULT_DEVICE:-}   # Fuzzy friendly name, e.g. "Kitchen" or "Living Room"
       SERIES_RESTART_TAIL_PCT: ${SERIES_RESTART_TAIL_PCT:-0.05}

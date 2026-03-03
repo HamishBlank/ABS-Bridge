@@ -36,7 +36,11 @@ CORS(app)
 # ---------------------------------------------------------------------------
 # Config (env vars or defaults)
 # ---------------------------------------------------------------------------
-ABS_URL = os.getenv("ABS_URL", "http://localhost:13378")
+ABS_URL        = os.getenv("ABS_URL", "http://localhost:13378")
+# ABS_PUBLIC_URL is used for Chromecast-facing stream/cover URLs.
+# Set this to your public HTTPS URL (e.g. https://abs.ablank.life) so
+# Chromecasts can reach the stream. Falls back to ABS_URL if not set.
+ABS_PUBLIC_URL = os.getenv("ABS_PUBLIC_URL", "").rstrip("/") or ABS_URL
 ABS_TOKEN = os.getenv("ABS_TOKEN", "")
 PROGRESS_INTERVAL = int(os.getenv("PROGRESS_INTERVAL", "15"))   # seconds
 HOST_IP = os.getenv("HOST_IP", "0.0.0.0")
@@ -91,7 +95,7 @@ def _refresh_libraries_and_series(force: bool = False):
                             "series_name": name,
                             "book_count": book_count,
                             "cover_item_id": cover_item_id,
-                            "cover_url": f"{ABS_URL}/api/items/{cover_item_id}/cover?token={ABS_TOKEN}" if cover_item_id else None,
+                            "cover_url": f"{ABS_PUBLIC_URL}/api/items/{cover_item_id}/cover?token={ABS_TOKEN}" if cover_item_id else None,
                             "qr_url": f"/play?{params}",
                         })
                     database.upsert_series(lib["id"], enriched)
@@ -263,12 +267,12 @@ def _build_stream_url(book_id: str) -> str:
             af = audio_files[0]
             ino = af.get("ino") or af.get("inode")
             if ino:
-                return f"{ABS_URL}/api/items/{book_id}/file/{ino}?token={ABS_TOKEN}"
+                return f"{ABS_PUBLIC_URL}/api/items/{book_id}/file/{ino}?token={ABS_TOKEN}"
     except Exception as e:
         log.warning(f"Direct play lookup failed: {e}")
 
     # Fallback: HLS stream
-    return f"{ABS_URL}/api/items/{book_id}/play?token={ABS_TOKEN}"
+    return f"{ABS_PUBLIC_URL}/api/items/{book_id}/play?token={ABS_TOKEN}"
 
 def update_abs_progress(book_id: str, current_time: float, duration: float):
     is_finished = duration > 0 and (current_time / duration) > 0.98
@@ -951,7 +955,21 @@ def api_series_lookup():
     results = database.get_series_cached()
     if q:
         results = [s for s in results if q in s["name"].lower()]
-    return jsonify(results)
+
+    # Normalise field names: DB uses "id"/"name", frontend expects "series_id"/"series_name"
+    normalised = []
+    for s in results:
+        normalised.append({
+            "series_id":    s["id"],
+            "series_name":  s["name"],
+            "library_id":   s["library_id"],
+            "library_name": s.get("library_name", ""),
+            "book_count":   s.get("book_count", 0),
+            "cover_item_id": s.get("cover_item_id"),
+            "cover_url":    s.get("cover_url"),
+            "qr_url":       s.get("qr_url"),
+        })
+    return jsonify(normalised)
 
 
 @app.get("/api/cache/status")
